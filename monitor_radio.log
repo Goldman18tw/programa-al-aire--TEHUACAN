@@ -12,3 +12,27 @@
 2025-12-21 15:30:01,575 | ERROR | Firestore init error: [Errno 2] No such file or directory: 'C:\\Users\\Raul Orozco Alvarez\\Desktop\\Nueva carpeta (6)\\programa al aire  TEHUACAN\\on-air-detector-firebase-adminsdk-fbsvc-147d81fe61.json'
 2025-12-21 15:30:01,576 | ERROR | Firestore init error: [Errno 2] No such file or directory: 'C:\\Users\\Raul Orozco Alvarez\\Desktop\\Nueva carpeta (6)\\programa al aire  TEHUACAN\\on-air-detector-firebase-adminsdk-fbsvc-147d81fe61.json'
 2025-12-21 15:30:05,020 | INFO | [XHBUAP - Puebla] ✓ RDS actualizado: STRFKR - RAWNALD GREGORY ERICKSON THE SECOND
+2025-12-21 16:04:29,062 | INFO | Cargando estación: XHBUAP - Puebla - URL: http://148.228.50.35:8000
+2025-12-21 16:04:29,067 | INFO | Cargando estación: XHTEE - Tehuacan - URL: http://187.141.99.161:8000
+2025-12-21 16:04:29,069 | INFO | Cargando estación: LOBO RADIO - URL: http://78.129.252.13:17090/;stream.mp3
+2025-12-21 16:04:29,070 | INFO | Cargando estación: XHCHP - Chignahuapan - URL: http://148.228.50.33:8000
+2025-12-21 16:04:29,082 | INFO | [XHBUAP - Puebla] Iniciando loop RDS: https://onair.radioapi.io/status/radiobuap/radiobuappuebla/source
+2025-12-21 16:04:29,121 | INFO | [XHTEE - Tehuacan] Iniciando loop RDS: https://onair.radioapi.io/status/radiobuap/radiobuaptehuacan/source
+2025-12-21 16:04:29,147 | INFO | [LOBO RADIO] No hay URL RDS configurada
+2025-12-21 16:04:29,185 | INFO | [XHCHP - Chignahuapan] Iniciando loop RDS: https://onair.radioapi.io/status/radiobuap/radiobuapchignahuapan/source
+2025-12-21 16:04:29,339 | INFO | API levantada en http://0.0.0.0:8090
+2025-12-21 16:04:29,612 | INFO | [XHCHP - Chignahuapan] Cambio a perfil 'tolerant': Mayor tolerancia (domingos/lunes 4pm-12am)
+2025-12-21 16:04:29,665 | ERROR | Firestore init error: [Errno 2] No such file or directory: 'C:\\Users\\Raul Orozco Alvarez\\Desktop\\Nueva carpeta (6)\\programa al aire  TEHUACAN\\on-air-detector-firebase-adminsdk-fbsvc-147d81fe61.json'
+2025-12-21 16:04:30,103 | INFO | [LOBO RADIO] Cambio a perfil 'tolerant': Mayor tolerancia (domingos/lunes 4pm-12am)
+2025-12-21 16:04:30,189 | ERROR | Firestore init error: [Errno 2] No such file or directory: 'C:\\Users\\Raul Orozco Alvarez\\Desktop\\Nueva carpeta (6)\\programa al aire  TEHUACAN\\on-air-detector-firebase-adminsdk-fbsvc-147d81fe61.json'
+2025-12-21 16:04:30,401 | INFO | [XHBUAP - Puebla] Cambio a perfil 'tolerant': Mayor tolerancia (domingos/lunes 4pm-12am)
+2025-12-21 16:04:30,425 | ERROR | Firestore init error: [Errno 2] No such file or directory: 'C:\\Users\\Raul Orozco Alvarez\\Desktop\\Nueva carpeta (6)\\programa al aire  TEHUACAN\\on-air-detector-firebase-adminsdk-fbsvc-147d81fe61.json'
+2025-12-21 16:04:30,426 | INFO | [XHTEE - Tehuacan] Cambio a perfil 'tolerant': Mayor tolerancia (domingos/lunes 4pm-12am)
+2025-12-21 16:04:30,479 | ERROR | Firestore init error: [Errno 2] No such file or directory: 'C:\\Users\\Raul Orozco Alvarez\\Desktop\\Nueva carpeta (6)\\programa al aire  TEHUACAN\\on-air-detector-firebase-adminsdk-fbsvc-147d81fe61.json'
+2025-12-21 16:04:35,004 | INFO | [XHBUAP - Puebla] ✓ RDS actualizado: 20251221_1RA PARTE.MP3 - 20251221_1RA PARTE.MP3
+2025-12-21 16:04:35,038 | INFO | [XHTEE - Tehuacan] ✓ RDS actualizado: La Universidad en la Radio - Radio BUAP Tehuacán
+2025-12-21 16:04:35,088 | INFO | [XHCHP - Chignahuapan] ✓ RDS actualizado: La Universidad en la Radio - Radio BUAP Chignahuapan
+2025-12-21 16:05:04,717 | INFO | [XHCHP - Chignahuapan] ✓ RDS actualizado: APOYO JAN CHILL 1 - APOYO JAN CHILL 1
+2025-12-21 16:05:10,555 | INFO | [XHCHP - Chignahuapan] ✓ RDS actualizado: WHILEFALSE - GLIDE
+2025-12-21 16:05:29,233 | INFO | [LOBO RADIO] Loop de RDS reiniciado tras detenerse
+2025-12-21 16:05:29,233 | INFO | [LOBO RADIO] No hay URL RDS configurada
