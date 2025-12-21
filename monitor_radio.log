@@ -36,3 +36,49 @@
 2025-12-21 16:05:10,555 | INFO | [XHCHP - Chignahuapan] ✓ RDS actualizado: WHILEFALSE - GLIDE
 2025-12-21 16:05:29,233 | INFO | [LOBO RADIO] Loop de RDS reiniciado tras detenerse
 2025-12-21 16:05:29,233 | INFO | [LOBO RADIO] No hay URL RDS configurada
+2025-12-21 16:09:14,050 | INFO | Cargando estación: XHBUAP - Puebla - URL: http://148.228.50.32:8000
+2025-12-21 16:09:14,054 | INFO | Cargando estación: XHTEE - Tehuacan - URL: http://187.141.99.161:8000
+2025-12-21 16:09:14,058 | INFO | Cargando estación: LOBO RADIO - URL: http://78.129.252.13:17090/;stream.mp3
+2025-12-21 16:09:14,060 | INFO | Cargando estación: XHCHP - Chignahuapan - URL: http://148.228.50.33:8000
+2025-12-21 16:09:14,080 | INFO | [XHBUAP - Puebla] Iniciando loop RDS: https://onair.radioapi.io/status/radiobuap/radiobuappuebla/source
+2025-12-21 16:09:14,110 | INFO | [XHTEE - Tehuacan] Iniciando loop RDS: https://onair.radioapi.io/status/radiobuap/radiobuaptehuacan/source
+2025-12-21 16:09:14,139 | INFO | [LOBO RADIO] No hay URL RDS configurada
+2025-12-21 16:09:14,160 | INFO | [XHCHP - Chignahuapan] Iniciando loop RDS: https://onair.radioapi.io/status/radiobuap/radiobuapchignahuapan/source
+2025-12-21 16:09:14,338 | INFO | API levantada en http://0.0.0.0:8090
+2025-12-21 16:09:14,498 | INFO | [XHBUAP - Puebla] Cambio a perfil 'tolerant': Mayor tolerancia (domingos/lunes 4pm-12am)
+2025-12-21 16:09:14,535 | ERROR | Firestore init error: [Errno 2] No such file or directory: 'C:\\Users\\Raul Orozco Alvarez\\Desktop\\Nueva carpeta (6)\\programa al aire  TEHUACAN\\on-air-detector-firebase-adminsdk-fbsvc-147d81fe61.json'
+2025-12-21 16:09:14,586 | INFO | [XHCHP - Chignahuapan] Cambio a perfil 'tolerant': Mayor tolerancia (domingos/lunes 4pm-12am)
+2025-12-21 16:09:14,630 | ERROR | Firestore init error: [Errno 2] No such file or directory: 'C:\\Users\\Raul Orozco Alvarez\\Desktop\\Nueva carpeta (6)\\programa al aire  TEHUACAN\\on-air-detector-firebase-adminsdk-fbsvc-147d81fe61.json'
+2025-12-21 16:09:15,031 | INFO | [LOBO RADIO] Cambio a perfil 'tolerant': Mayor tolerancia (domingos/lunes 4pm-12am)
+2025-12-21 16:09:15,059 | ERROR | Firestore init error: [Errno 2] No such file or directory: 'C:\\Users\\Raul Orozco Alvarez\\Desktop\\Nueva carpeta (6)\\programa al aire  TEHUACAN\\on-air-detector-firebase-adminsdk-fbsvc-147d81fe61.json'
+2025-12-21 16:09:15,429 | INFO | [XHTEE - Tehuacan] Cambio a perfil 'tolerant': Mayor tolerancia (domingos/lunes 4pm-12am)
+2025-12-21 16:09:15,460 | ERROR | Firestore init error: [Errno 2] No such file or directory: 'C:\\Users\\Raul Orozco Alvarez\\Desktop\\Nueva carpeta (6)\\programa al aire  TEHUACAN\\on-air-detector-firebase-adminsdk-fbsvc-147d81fe61.json'
+2025-12-21 16:09:19,976 | INFO | [XHBUAP - Puebla] ✓ RDS actualizado: 20251221_1RA PARTE.MP3 - 20251221_1RA PARTE.MP3
+2025-12-21 16:09:20,019 | INFO | [XHTEE - Tehuacan] ✓ RDS actualizado: La Universidad en la Radio - Radio BUAP Tehuacán
+2025-12-21 16:09:20,082 | INFO | [XHCHP - Chignahuapan] ✓ RDS actualizado: TRINIX REMIX - MOI...LOLITA - ANGÈLE
+2025-12-21 16:10:14,192 | INFO | [LOBO RADIO] Loop de RDS reiniciado tras detenerse
+2025-12-21 16:10:14,193 | INFO | [LOBO RADIO] No hay URL RDS configurada
+2025-12-21 16:11:14,229 | INFO | [LOBO RADIO] Loop de RDS reiniciado tras detenerse
+2025-12-21 16:11:14,230 | INFO | [LOBO RADIO] No hay URL RDS configurada
+2025-12-21 16:11:41,736 | INFO | [XHCHP - Chignahuapan] ✓ RDS actualizado: X PISADOR CHILLOUT CHIGNAHUAPAN JAN - X PISADOR CHILLOUT CHIGNAHUAPAN JAN
+2025-12-21 16:11:53,730 | INFO | [XHCHP - Chignahuapan] ✓ RDS actualizado: BEN BÖHMER - BREATHING
+2025-12-21 16:12:14,305 | INFO | [LOBO RADIO] Loop de RDS reiniciado tras detenerse
+2025-12-21 16:12:14,366 | INFO | [LOBO RADIO] No hay URL RDS configurada
+2025-12-21 16:13:14,345 | INFO | [LOBO RADIO] Loop de RDS reiniciado tras detenerse
+2025-12-21 16:13:14,346 | INFO | [LOBO RADIO] No hay URL RDS configurada
+2025-12-21 16:14:14,387 | INFO | [LOBO RADIO] Loop de RDS reiniciado tras detenerse
+2025-12-21 16:14:14,410 | INFO | [LOBO RADIO] No hay URL RDS configurada
+2025-12-21 16:15:14,439 | INFO | [LOBO RADIO] Loop de RDS reiniciado tras detenerse
+2025-12-21 16:15:14,532 | INFO | [LOBO RADIO] No hay URL RDS configurada
+2025-12-21 16:15:40,955 | INFO | [XHCHP - Chignahuapan] ✓ RDS actualizado: La Universidad en la Radio - Radio BUAP Chignahuapan
+2025-12-21 16:16:14,472 | INFO | [LOBO RADIO] Loop de RDS reiniciado tras detenerse
+2025-12-21 16:16:14,528 | INFO | [LOBO RADIO] No hay URL RDS configurada
+2025-12-21 16:16:23,753 | INFO | [XHBUAP - Puebla] ✓ RDS actualizado: La Universidad en la Radio - Radio BUAP
+2025-12-21 16:17:13,365 | INFO | [XHTEE - Tehuacan] ✓ RDS actualizado: X PISADOR LOMEJOR - X PISADOR APOYO CLASICA 2
+2025-12-21 16:17:14,561 | INFO | [LOBO RADIO] Loop de RDS reiniciado tras detenerse
+2025-12-21 16:17:14,563 | INFO | [LOBO RADIO] No hay URL RDS configurada
+2025-12-21 16:17:18,976 | INFO | [XHCHP - Chignahuapan] ✓ RDS actualizado: WILL K - SUN IS DARK
+2025-12-21 16:17:25,673 | INFO | [XHTEE - Tehuacan] ✓ RDS actualizado: La Universidad en la Radio - Radio BUAP Tehuacán
+2025-12-21 16:17:37,501 | INFO | [XHBUAP - Puebla] ✓ RDS actualizado: 20251221_2DA PARTE - 20251221_2DA PARTE
+2025-12-21 16:18:14,603 | INFO | [LOBO RADIO] Loop de RDS reiniciado tras detenerse
+2025-12-21 16:18:14,604 | INFO | [LOBO RADIO] No hay URL RDS configurada
