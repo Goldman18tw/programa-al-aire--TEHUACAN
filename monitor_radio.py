@@ -748,7 +748,8 @@ def get_song_stats(station_name: str = None) -> dict:
     sorted_songs = sorted(song_counts.items(), key=lambda x: x[1], reverse=True)
     
     return {
-        "top_songs": sorted_songs[:50],  # Top 50
+        # Devolver TODAS las canciones ordenadas por repeticiones
+        "top_songs": sorted_songs,
         "timestamps": song_timestamps,
         "total_tracked": len(history)
     }
@@ -1027,6 +1028,13 @@ class StationMonitor:
         self.vlc_player = None
         self.ffplay_proc: subprocess.Popen | None = None
 
+        # Tareas asíncronas críticas
+        self.ffmpeg_task: asyncio.Task | None = None
+        self.rds_task: asyncio.Task | None = None
+        self.anim_task: asyncio.Task | None = None
+        self.stats_task: asyncio.Task | None = None
+        self.keepalive_task: asyncio.Task | None = None
+
         # onda (ancho igual / alto reducido por escala)
         self.W = 480  # Ancho de onda
         self.H = 150  # Altura de onda - ajustado para que quepa perfectamente
@@ -1039,10 +1047,11 @@ class StationMonitor:
         # tareas se inician en start() tras page.update()
 
     def start(self):
-        self.page.run_task(self._anim_loop)
-        self.page.run_task(self._update_stats_loop)
-        self.page.run_task(self._rds_update_loop)  # Nuevo loop para RDS
-        self.page.run_task(self._run_ffmpeg)
+        self.anim_task = self.page.run_task(self._anim_loop)
+        self.stats_task = self.page.run_task(self._update_stats_loop)
+        self.rds_task = self.page.run_task(self._rds_update_loop)  # Nuevo loop para RDS
+        self.ffmpeg_task = self.page.run_task(self._run_ffmpeg)
+        self.keepalive_task = self.page.run_task(self._keepalive_loop)
     
     def _get_rds_url(self) -> str:
         """Obtiene la URL de RDS para esta estación basado en su nombre."""
@@ -2217,6 +2226,36 @@ class StationMonitor:
             await asyncio.sleep(backoff)
             backoff = min(backoff*2, 60)
 
+    async def _keepalive_loop(self):
+        """Vigila y revive tareas largas para sesiones abiertas por días."""
+        while not self.stop_flag:
+            await asyncio.sleep(60)
+
+            # Si el loop de FFmpeg murió por excepción, reiniciarlo
+            if self.ffmpeg_task and self.ffmpeg_task.done() and not self.stop_flag:
+                exc = None
+                try:
+                    exc = self.ffmpeg_task.exception()
+                except Exception:
+                    pass
+                if exc:
+                    logger.error(f"[{self.cfg['name']}] Loop de captura terminó por excepción: {exc}")
+                else:
+                    logger.warning(f"[{self.cfg['name']}] Loop de captura terminado; reiniciando para mantener monitoreo")
+
+                self._kill_ffmpeg()
+                self.ffmpeg_task = self.page.run_task(self._run_ffmpeg)
+                self.lbl_info.value = "Reconectando…"
+                try:
+                    self.page.update()
+                except Exception:
+                    pass
+
+            # Reiniciar loop de RDS si se detuvo
+            if self.rds_task and self.rds_task.done() and not self.stop_flag:
+                self.rds_task = self.page.run_task(self._rds_update_loop)
+                logger.info(f"[{self.cfg['name']}] Loop de RDS reiniciado tras detenerse")
+
     def _kill_ffmpeg(self):
         try:
             if self.proc and self.proc.returncode is None:
@@ -2855,6 +2894,13 @@ class StationMonitor:
         self.stop_flag = True
         self._kill_ffmpeg()
         self._stop_audio()
+        for t in (self.ffmpeg_task, self.rds_task, self.anim_task, self.stats_task, self.keepalive_task):
+            if t:
+                try:
+                    t.cancel()
+                except Exception:
+                    pass
+        self.ffmpeg_task = self.rds_task = self.anim_task = self.stats_task = self.keepalive_task = None
 
 
 app_state = {"cfg": {}, "stations_ui": [], "stations_col": None}
