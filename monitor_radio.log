@@ -1,0 +1,14 @@
+2025-12-21 15:29:59,085 | INFO | Cargando estación: XHBUAP - Puebla - URL: http://148.228.50.35:8000
+2025-12-21 15:29:59,090 | INFO | Cargando estación: XHTEE - Tehuacan - URL: http://187.141.99.161:8000
+2025-12-21 15:29:59,094 | INFO | Cargando estación: LOBO RADIO - URL: http://78.129.252.13:17090/;stream.mp3
+2025-12-21 15:29:59,101 | INFO | Cargando estación: XHCHP - Chignahuapan - URL: http://148.228.50.33:8000
+2025-12-21 15:29:59,114 | INFO | [XHBUAP - Puebla] Iniciando loop RDS: https://onair.radioapi.io/status/radiobuap/radiobuappuebla/source
+2025-12-21 15:30:00,030 | INFO | [XHTEE - Tehuacan] Iniciando loop RDS: https://onair.radioapi.io/status/radiobuap/radiobuaptehuacan/source
+2025-12-21 15:30:00,046 | INFO | [LOBO RADIO] No hay URL RDS configurada
+2025-12-21 15:30:00,061 | INFO | [XHCHP - Chignahuapan] Iniciando loop RDS: https://onair.radioapi.io/status/radiobuap/radiobuapchignahuapan/source
+2025-12-21 15:30:00,288 | INFO | API levantada en http://0.0.0.0:8090
+2025-12-21 15:30:00,570 | ERROR | Firestore init error: [Errno 2] No such file or directory: 'C:\\Users\\Raul Orozco Alvarez\\Desktop\\Nueva carpeta (6)\\programa al aire  TEHUACAN\\on-air-detector-firebase-adminsdk-fbsvc-147d81fe61.json'
+2025-12-21 15:30:01,084 | ERROR | Firestore init error: [Errno 2] No such file or directory: 'C:\\Users\\Raul Orozco Alvarez\\Desktop\\Nueva carpeta (6)\\programa al aire  TEHUACAN\\on-air-detector-firebase-adminsdk-fbsvc-147d81fe61.json'
+2025-12-21 15:30:01,575 | ERROR | Firestore init error: [Errno 2] No such file or directory: 'C:\\Users\\Raul Orozco Alvarez\\Desktop\\Nueva carpeta (6)\\programa al aire  TEHUACAN\\on-air-detector-firebase-adminsdk-fbsvc-147d81fe61.json'
+2025-12-21 15:30:01,576 | ERROR | Firestore init error: [Errno 2] No such file or directory: 'C:\\Users\\Raul Orozco Alvarez\\Desktop\\Nueva carpeta (6)\\programa al aire  TEHUACAN\\on-air-detector-firebase-adminsdk-fbsvc-147d81fe61.json'
+2025-12-21 15:30:05,020 | INFO | [XHBUAP - Puebla] ✓ RDS actualizado: STRFKR - RAWNALD GREGORY ERICKSON THE SECOND
