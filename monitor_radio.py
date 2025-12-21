@@ -349,6 +349,7 @@ DEFAULT_STATION = {
     "silence_seconds": 9,
     "db_threshold": -55.0,  # Umbral más bajo para evitar falsas alertas con música suave
     "cooldown_seconds": 60,
+    "grace_period_seconds": GRACE_PERIOD_SECONDS,
     "email_body_alert": "La estación '{name}' no transmite audio desde hace más de {seconds} segundos.",
     "email_body_ok":    "La estación volvió al aire tras {duration}.",
 }
@@ -943,7 +944,7 @@ def _player_friendly_url(u: str) -> str:
 # ---- Prefs por URL ----
 PREF_KEYS = [
     "name", "from", "recipients",
-    "silence_seconds", "db_threshold", "cooldown_seconds",
+    "silence_seconds", "db_threshold", "cooldown_seconds", "grace_period_seconds",
     "email_body_alert", "email_body_ok",
 ]
 
@@ -1049,7 +1050,11 @@ class StationMonitor:
     def start(self):
         self.anim_task = self.page.run_task(self._anim_loop)
         self.stats_task = self.page.run_task(self._update_stats_loop)
-        self.rds_task = self.page.run_task(self._rds_update_loop)  # Nuevo loop para RDS
+        # Solo iniciar loop de RDS si hay URL configurada
+        if self.rds_url:
+            self.rds_task = self.page.run_task(self._rds_update_loop)  # Nuevo loop para RDS
+        else:
+            self.rds_task = None
         self.ffmpeg_task = self.page.run_task(self._run_ffmpeg)
         self.keepalive_task = self.page.run_task(self._keepalive_loop)
     
@@ -1604,6 +1609,19 @@ class StationMonitor:
         ent_sil  = ft.TextField(label="Seg. silencio", value=str(st["silence_seconds"]), width=triple_w)
         ent_db   = ft.TextField(label="Umbral dB", value=str(abs(st["db_threshold"])), width=triple_w)
         ent_cd   = ft.TextField(label="Cooldown", value=str(st["cooldown_seconds"]), width=triple_w)
+        grace_default = st.get("grace_period_seconds", GRACE_PERIOD_SECONDS)
+        lbl_grace = ft.Text(f"Tiempo de verificación: {grace_default//60} min", size=12)
+        def update_grace(e):
+            lbl_grace.value = f"Tiempo de verificación: {int(e.control.value)//60} min"
+            self.page.update()
+        grace_slider = ft.Slider(
+            min=60,
+            max=900,
+            divisions=14,
+            value=grace_default,
+            label="{value} s",
+            on_change=update_grace,
+        )
         tb_rcpt  = ft.TextField(label="Destinatarios (uno por línea)",
                                 multiline=True, min_lines=4, max_lines=6, value="\n".join(st.get("recipients", [])))
         tb_alert = ft.TextField(label="Texto ALERTA", multiline=True, min_lines=2, value=st["email_body_alert"])
@@ -1636,6 +1654,9 @@ class StationMonitor:
             except: pass
             try:
                 st["cooldown_seconds"] = max(1, int(float(ent_cd.value.strip())))
+            except: pass
+            try:
+                st["grace_period_seconds"] = max(60, int(float(grace_slider.value)))
             except: pass
             st["recipients"] = [r.strip() for r in tb_rcpt.value.strip().splitlines() if r.strip()]
             st["email_body_alert"] = tb_alert.value.strip() or st["email_body_alert"]
@@ -1704,6 +1725,9 @@ class StationMonitor:
                            alignment=ft.MainAxisAlignment.START),
                     ent_name, ent_url, ent_from,
                     ft.Row([ent_sil, ent_db, ent_cd], spacing=spacing),
+                    ft.Text("Espera antes de alertar (verificación)", size=12, color=ft.Colors.GREY_400),
+                    grace_slider,
+                    lbl_grace,
                     tb_rcpt, tb_alert, tb_ok,
                     ft.Row([ft.FilledButton("Guardar", on_click=save),
                             ft.OutlinedButton("Probar SMTP", on_click=test_smtp)],
@@ -2252,7 +2276,7 @@ class StationMonitor:
                     pass
 
             # Reiniciar loop de RDS si se detuvo
-            if self.rds_task and self.rds_task.done() and not self.stop_flag:
+            if self.rds_url and self.rds_task and self.rds_task.done() and not self.stop_flag:
                 self.rds_task = self.page.run_task(self._rds_update_loop)
                 logger.info(f"[{self.cfg['name']}] Loop de RDS reiniciado tras detenerse")
 
@@ -2283,6 +2307,7 @@ class StationMonitor:
             self.pending_alert = True
             self.alert_verification_start = now
             self.last_verification_check = now
+            grace_seconds = self.cfg.get("grace_period_seconds", GRACE_PERIOD_SECONDS)
             
             elapsed = (now - self.silence_start_ts).total_seconds()
             
@@ -2290,9 +2315,9 @@ class StationMonitor:
             if not self.network_ok:
                 self.lbl_info.value = f"⚠️ Verificando... Red caída ({elapsed:.0f}s)"
             else:
-                self.lbl_info.value = f"🔍 Verificando silencio... ({elapsed:.0f}s / {GRACE_PERIOD_SECONDS}s)"
+                self.lbl_info.value = f"🔍 Verificando silencio... ({elapsed:.0f}s / {grace_seconds}s)"
             
-            logger.info(f"[{self.cfg['name']}] Silencio detectado - Iniciando periodo de verificación ({GRACE_PERIOD_SECONDS}s)")
+            logger.info(f"[{self.cfg['name']}] Silencio detectado - Iniciando periodo de verificación ({grace_seconds}s)")
             
             # Iniciar tarea de verificación
             self.page.run_task(self._verification_loop)
@@ -2302,8 +2327,9 @@ class StationMonitor:
         consecutive_silent_checks = 0
         total_checks = 0
         audio_detected_count = 0
-        
-        logger.info(f"[{self.cfg['name']}] Iniciando loop de verificación - Duración: {GRACE_PERIOD_SECONDS}s")
+        grace_seconds = self.cfg.get("grace_period_seconds", GRACE_PERIOD_SECONDS)
+
+        logger.info(f"[{self.cfg['name']}] Iniciando loop de verificación - Duración: {grace_seconds}s")
         
         while self.pending_alert and not self.stop_flag:
             await asyncio.sleep(VERIFICATION_INTERVAL)
@@ -2355,7 +2381,7 @@ class StationMonitor:
             grace_elapsed = (now - self.alert_verification_start).total_seconds()
             
             # Actualizar UI durante verificación
-            remaining = max(0, GRACE_PERIOD_SECONDS - grace_elapsed)
+            remaining = max(0, grace_seconds - grace_elapsed)
             confidence = (consecutive_silent_checks / total_checks * 100) if total_checks > 0 else 0
             
             if not self.network_ok:
@@ -2365,7 +2391,7 @@ class StationMonitor:
             self.page.update()
             
             # Si pasó el periodo de gracia Y sigue caído, CONFIRMAR y enviar email
-            if grace_elapsed >= GRACE_PERIOD_SECONDS:
+            if grace_elapsed >= grace_seconds:
                 # Verificar que al menos el 70% de los checks fueron silencio real (bajado de 80%)
                 silence_confidence = (consecutive_silent_checks / total_checks * 100) if total_checks > 0 else 0
                 
@@ -2389,6 +2415,7 @@ class StationMonitor:
     def _send_confirmed_alert(self, total_downtime: float):
         """Envía el email SOLO después de confirmar que la caída es real."""
         now = dt.datetime.now()
+        grace_seconds = self.cfg.get("grace_period_seconds", GRACE_PERIOD_SECONDS)
         
         # Actualizar UI
         if not self.network_ok:
@@ -2405,7 +2432,7 @@ class StationMonitor:
             "event_type": "offline_confirmed",
             "network_issue": not self.network_ok,
             "level_dbfs": float(self.current_db),
-            "verification_time": GRACE_PERIOD_SECONDS,
+            "verification_time": grace_seconds,
             "total_downtime": total_downtime
         }
         save_event_to_history(event)
@@ -2436,7 +2463,7 @@ class StationMonitor:
                     f"ALERTA VERIFICADA\n\n"
                     f"La estación '{self.cfg['name']}' NO es accesible.\n"
                     f"Problema detectado hace: {human_duration(total_downtime)}\n"
-                    f"Tiempo de verificación: {human_duration(GRACE_PERIOD_SECONDS)}\n\n"
+                    f"Tiempo de verificación: {human_duration(grace_seconds)}\n\n"
                     f"Posible problema de conectividad a internet.\n"
                     f"Inicio de caída: {self.silence_start_ts.strftime('%Y-%m-%d %H:%M:%S') if self.silence_start_ts else 'N/A'}\n"
                     f"Alerta enviada: {now.strftime('%Y-%m-%d %H:%M:%S')}\n"
@@ -2447,7 +2474,7 @@ class StationMonitor:
                     f"ALERTA VERIFICADA\n\n"
                     f"Se ha confirmado que la estación '{self.cfg['name']}' está fuera del aire.\n\n"
                     f"Tiempo sin audio: {human_duration(total_downtime)}\n"
-                    f"Verificado durante: {human_duration(GRACE_PERIOD_SECONDS)}\n"
+                    f"Verificado durante: {human_duration(grace_seconds)}\n"
                     f"Inicio de caída: {self.silence_start_ts.strftime('%Y-%m-%d %H:%M:%S') if self.silence_start_ts else 'N/A'}\n"
                     f"Alerta enviada: {now.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
                     f"Esta alerta se envió después de verificar que el problema persiste.\n"
@@ -2708,94 +2735,9 @@ class StationMonitor:
     
     async def _rds_update_loop(self):
         """Actualiza la información de RDS/Now Playing inmediatamente al cambiar."""
+        # Si no hay RDS configurado, omitir loop para evitar spam de logs (ej. Lobo Radio)
         if not self.rds_url:
-            logger.info(f"[{self.cfg['name']}] No hay URL RDS configurada")
-            self.lbl_song.value = ""
-            return
-        
-        logger.info(f"[{self.cfg['name']}] Iniciando loop RDS: {self.rds_url}")
-        last_song = None
-        
-        while not self.stop_flag:
-            try:
-                # Verificar cada 5 segundos para capturar pisadores cortos
-                await asyncio.sleep(5)
-                
-                # Obtener datos de RDS
-                timeout = aiohttp.ClientTimeout(total=10)
-                async with aiohttp.ClientSession(timeout=timeout) as session:
-                    async with session.get(self.rds_url) as response:
-                        if response.status == 200:
-                            # Leer como texto primero
-                            text = await response.text()
-                            logger.debug(f"[{self.cfg['name']}] RDS raw: {text[:200]}")
-                            
-                            # Intentar parsear como JSON
-                            try:
-                                data = json.loads(text)
-                                logger.debug(f"[{self.cfg['name']}] RDS parsed: {data}")
-                            except json.JSONDecodeError as e:
-                                logger.warning(f"[{self.cfg['name']}] RDS no es JSON válido: {text[:100]} - Error: {e}")
-                                continue
-                            
-                            # Extraer información de canción
-                            song_info = "Unknown"
-                            
-                            if isinstance(data, dict):
-                                title = data.get("title", "")
-                                artist = data.get("artist", "")
-                                
-                                logger.debug(f"[{self.cfg['name']}] RDS title={title}, artist={artist}")
-                                
-                                # Construir string de canción
-                                if artist and title:
-                                    song_info = f"{artist} - {title}"
-                                elif title:
-                                    song_info = title
-                                elif artist:
-                                    song_info = artist
-                                
-                                # Fallbacks
-                                if song_info == "Unknown":
-                                    if "current_track" in data:
-                                        track = data["current_track"]
-                                        if isinstance(track, dict):
-                                            song_info = track.get("title", track.get("text", "Unknown"))
-                                        elif isinstance(track, str):
-                                            song_info = track
-                                    elif "nowplaying" in data:
-                                        song_info = data["nowplaying"]
-                                    elif "song" in data:
-                                        song_info = data["song"].get("text", data["song"]) if isinstance(data["song"], dict) else data["song"]
-                            
-                            # Limpiar y actualizar SOLO SI CAMBIÓ
-                            song_info = str(song_info).strip()
-                            if song_info and song_info != "Unknown" and song_info != last_song:
-                                self.current_song = song_info
-                                last_song = song_info
-                                
-                                logger.info(f"[{self.cfg['name']}] ✓ RDS actualizado: {song_info}")
-                                
-                                # Guardar en historial INMEDIATAMENTE
-                                save_rds_entry(self.cfg["name"], song_info)
-                                
-                                # Actualizar UI (SIN 🚨 en UI principal)
-                                self.lbl_song.value = f"♪ {song_info}"
-                                self.lbl_song.color = ft.Colors.CYAN_400
-                                
-                                self.page.update()
-                            elif song_info == last_song:
-                                logger.debug(f"[{self.cfg['name']}] RDS sin cambios: {song_info}")
-                        else:
-                            logger.warning(f"[{self.cfg['name']}] RDS HTTP {response.status}")
-                            
-            except asyncio.TimeoutError:
-                logger.warning(f"[{self.cfg['name']}] RDS timeout")
-            except Exception as e:
-                logger.error(f"[{self.cfg['name']}] Error RDS: {e}", exc_info=True)
-        """Actualiza la información de RDS/Now Playing cada X segundos."""
-        if not self.rds_url:
-            logger.info(f"[{self.cfg['name']}] No hay URL RDS configurada")
+            logger.info(f"[{self.cfg['name']}] RDS desactivado: sin URL configurada")
             self.lbl_song.value = ""
             return
         
