@@ -26,6 +26,15 @@ jobs:
                -ArgumentList 'MonitorAlAire_Windows\app\monitor_app.py','--autoprueba',"$PWD\captura_portatil.png",'40' `
                -PassThru -Wait
           if (-not (Test-Path captura_portatil.png)) { Get-Content MonitorAlAire_Windows\datos\monitor_aire.log -ErrorAction SilentlyContinue; exit 1 }
+      - name: Probar curl.exe contra los streams principales
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          foreach ($d in 'puebla','tehuacan','chignahuapan','loboradio') {
+            $u = "https://$d.radiobuap.com.mx/stream"
+            $r = & curl.exe -s -o NUL --max-time 5 -w "%{http_code} %{size_download}" -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36" $u
+            Write-Host "$u -> $r"
+          }
       - name: Verificar cuenta de correo (solo inicio de sesión, no envía nada)
         continue-on-error: true
         shell: pwsh
