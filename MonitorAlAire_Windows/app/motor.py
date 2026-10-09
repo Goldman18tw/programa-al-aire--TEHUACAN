@@ -66,6 +66,10 @@ DEFAULTS = {
     "recordatorio_minutos": 30,     # recordatorio mientras siga fuera (0 = no)
 }
 
+CURL = shutil.which("curl.exe" if os.name == "nt" else "curl")
+# Clave opcional que se manda en el encabezado X-Monitor-Clave; sirve para crear una
+# regla en Cloudflare que deje pasar al monitor (ver README).
+MONITOR_KEY = ""
 USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 SAMPLE_RATE = 8000          # suficiente para medir nivel y muy ligero
@@ -118,6 +122,7 @@ def load_config() -> dict:
                  ("contrasena", ""), ("remitente", "Monitor Al Aire")):
         mail.setdefault(k, v)
     cfg.setdefault("estaciones", [])
+    cfg.setdefault("clave_monitor", uuid.uuid4().hex[:24])
     if path == CONFIG_FILE and migrate_config(cfg):
         try:
             save_config(cfg)
@@ -423,6 +428,8 @@ def rms_db(chunk: bytes) -> float:
 
 _ERRORS = [
     ("connection refused", "conexión rechazada (el servidor no acepta conexiones en ese puerto)"),
+    ("couldn't connect", "no se pudo conectar al servidor (apagado o bloqueado)"),
+    ("could not resolve", "no se encontró el servidor (revisa la URL o el DNS)"),
     ("actively refused", "conexión rechazada (el servidor no acepta conexiones en ese puerto)"),
     ("10061", "conexión rechazada (el servidor no acepta conexiones en ese puerto)"),
     ("error number -138", "no se pudo conectar (servidor apagado o bloqueado por firewall)"),
@@ -453,6 +460,18 @@ def explain_error(raw: str) -> str:
     return raw.strip()
 
 
+def short_error(err: str) -> str:
+    """Motivo corto para mostrar en la tarjeta."""
+    e = (err or "").lower()
+    for key, text in (("403", "Bloqueado (403)"), ("rechazada", "Rechazado"), ("tiempo de espera", "Sin respuesta"),
+                      ("no se encontró el servidor", "Error de DNS"), ("certificado", "Certificado"),
+                      ("404", "No existe (404)"), ("cerró", "Cortado"), ("cortó", "Cortado"),
+                      ("no envía audio", "Sin audio válido"), ("firewall", "Sin respuesta")):
+        if key in e:
+            return text
+    return "Sin conexión"
+
+
 class StreamMonitor:
     def __init__(self, station: str, sid: str, label: str, url: str, threshold_db: float):
         self.station = station
@@ -471,6 +490,9 @@ class StreamMonitor:
         self.ever_data = False
         self.last_error = ""
         self._logged: dict[str, str] = {}
+        self.errors: dict[str, str] = {}  # último error de cada forma de conectar
+        self.method = ""
+        self.aux_proc: subprocess.Popen | None = None
         self.proc: subprocess.Popen | None = None
         self.stopped = False
         self.bad_alerted = False
@@ -500,26 +522,47 @@ class StreamMonitor:
         self.stopped = True
         self._kill()
 
+    def _headers(self) -> dict:
+        h = {"User-Agent": USER_AGENT, "Accept": "*/*",
+             "Accept-Language": "es-MX,es;q=0.9,en;q=0.8", "Icy-MetaData": "0",
+             "Referer": "https://radiobuap.mx/", "Connection": "keep-alive"}
+        if MONITOR_KEY:
+            h["X-Monitor-Clave"] = MONITOR_KEY
+        return h
+
     def _cmd(self, ffmpeg: str, source: str):
-        cmd = [ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error"]
+        tail = ["-vn", "-ac", "1", "-ar", str(SAMPLE_RATE), "-f", "s16le", "pipe:1"]
         if source == "directo":
-            cmd += ["-user_agent", USER_AGENT, "-rw_timeout", "15000000", "-i", self.url]
-        else:
-            cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-i", "pipe:0"]
-        return cmd + ["-vn", "-ac", "1", "-ar", str(SAMPLE_RATE), "-f", "s16le", "pipe:1"]
+            extra = "".join(f"{k}: {v}\r\n" for k, v in self._headers().items()
+                            if k not in ("User-Agent", "Connection"))
+            return [ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error",
+                    "-user_agent", USER_AGENT, "-headers", extra,
+                    "-rw_timeout", "15000000", "-i", self.url] + tail
+        return [ffmpeg, "-hide_banner", "-loglevel", "error", "-i", "pipe:0"] + tail
+
+    def _methods(self) -> list[str]:
+        """Formas de conectar, en orden. Si una falla 2 veces se pasa a la siguiente."""
+        m = ["sistema", "curl", "directo"] if self.url.lower().startswith("https://") \
+            else ["directo", "sistema", "curl"]
+        if not CURL:
+            m.remove("curl")
+        return m
 
     def _run(self, ffmpeg: str):
-        """Conecta al stream. Hay dos formas y se alternan si una falla:
+        """Conecta al stream con una de estas formas (se rotan si una falla):
         - "directo": ffmpeg abre la URL.
-        - "sistema": Python abre la URL con la conexión de Windows (usa el proxy
-          y los certificados del sistema, como el navegador) y le pasa el audio a ffmpeg."""
+        - "sistema": Python abre la URL (proxy y certificados de Windows) y pasa el audio a ffmpeg.
+        - "curl": curl.exe de Windows (seguridad de Windows) descarga y pasa el audio a ffmpeg.
+        En Windows, Cloudflare bloquea a ffmpeg en los streams HTTPS; por eso estos
+        empiezan con "sistema"."""
         backoff = 2
         flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-        # HTTPS (Cloudflare) rechaza a ffmpeg en Windows con 403, pero acepta la
-        # conexión de Windows; HTTP simple (Shoutcast/Icecast por IP) va mejor directo.
-        source = "sistema" if self.url.lower().startswith("https://") else "directo"
+        methods = self._methods()
+        idx = 0
         fails_in_source = 0
         while not self.stopped:
+            source = methods[idx % len(methods)]
+            self.method = source
             got_data = False
             err_lines: list[str] = []
             feed_err: list[str] = []
@@ -533,6 +576,9 @@ class StreamMonitor:
                 threading.Thread(target=self._read_stderr, args=(proc, err_lines), daemon=True).start()
                 if source == "sistema":
                     threading.Thread(target=self._feed, args=(proc, feed_err), daemon=True).start()
+                elif source == "curl":
+                    threading.Thread(target=self._feed_curl, args=(proc, feed_err, flags),
+                                     daemon=True).start()
                 buf = b""
                 while not self.stopped:
                     chunk = proc.stdout.read(4000)
@@ -566,17 +612,18 @@ class StreamMonitor:
             else:
                 time.sleep(0.3)  # dejar que se lea el último mensaje de error
                 raw = (feed_err or err_lines or ["sin respuesta del servidor"])[-1]
-                err = explain_error(raw)[:200]
+                err = explain_error(raw)[:220]
+                self.errors[source] = err
                 if self._logged.get(source) != err:
                     self._logged[source] = err
                     log.warning(f"[{self.name}] no conecta ({source}): {err}")
                 self.last_error = err
                 fails_in_source += 1
                 if fails_in_source >= 2:
-                    source = "sistema" if source == "directo" else "directo"
+                    idx += 1
                     fails_in_source = 0
-                    backoff = 2
-                    continue
+                    if idx % len(methods):
+                        continue  # probar de inmediato la siguiente forma
             time.sleep(backoff)
             backoff = min(backoff * 2, MAX_BACKOFF)
 
@@ -592,10 +639,9 @@ class StreamMonitor:
             pass
 
     def _feed(self, proc: subprocess.Popen, err: list):
-        """Descarga el stream con la conexión de Windows y se lo pasa a ffmpeg."""
+        """Descarga el stream con Python (conexión de Windows) y se lo pasa a ffmpeg."""
         try:
-            req = urllib.request.Request(self.url, headers={"User-Agent": USER_AGENT,
-                                                            "Accept": "*/*", "Icy-MetaData": "0"})
+            req = urllib.request.Request(self.url, headers=self._headers())
             with urllib.request.urlopen(req, timeout=15) as r:
                 while not self.stopped and proc.poll() is None:
                     data = r.read(8192)
@@ -613,6 +659,36 @@ class StreamMonitor:
                 proc.stdin.close()
             except Exception:
                 pass
+
+    def _feed_curl(self, proc: subprocess.Popen, err: list, flags: int):
+        """Descarga el stream con curl.exe de Windows y se lo pasa a ffmpeg."""
+        cmd = [CURL, "-sS", "-N", "-L", "--fail", "--connect-timeout", "15",
+               "--speed-time", "20", "--speed-limit", "500", "--compressed"]
+        for k, v in self._headers().items():
+            cmd += ["-A", v] if k == "User-Agent" else ["-H", f"{k}: {v}"]
+        cmd.append(self.url)
+        cp = None
+        try:
+            cp = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE, creationflags=flags, bufsize=0)
+            self.aux_proc = cp
+            while not self.stopped and proc.poll() is None:
+                data = cp.stdout.read(8192)
+                if not data:
+                    msg = cp.stderr.read().decode("utf-8", "ignore").strip()
+                    err.append((msg if msg.startswith("curl") else f"curl: {msg}") if msg
+                               else "el servidor cerró la conexión")
+                    break
+                proc.stdin.write(data)
+        except Exception as e:
+            if proc.poll() is None:
+                err.append(f"curl: {type(e).__name__}: {e}")
+        finally:
+            for f in (lambda: proc.stdin.close(), lambda: cp and cp.kill()):
+                try:
+                    f()
+                except Exception:
+                    pass
 
     def _process_window(self, win: bytes):
         db = rms_db(win)
@@ -636,12 +712,12 @@ class StreamMonitor:
                 self._kill()
 
     def _kill(self):
-        p = self.proc
-        if p and p.poll() is None:
-            try:
-                p.kill()
-            except Exception:
-                pass
+        for p in (self.proc, self.aux_proc):
+            if p and p.poll() is None:
+                try:
+                    p.kill()
+                except Exception:
+                    pass
 
     def state(self, t: float) -> str:
         last_data, last_sound, _, _, connected = self.snapshot()
@@ -668,7 +744,9 @@ class StreamMonitor:
         _, last_sound, _, level, _ = self.snapshot()
         st = self.state(t)
         return {"id": self.id, "nombre": self.label, "url": self.url, "estado": st,
+                "forma": self.method, "errores": dict(self.errors),
                 "error": self.last_error if st in ("sin_conexion", "conectando") else "",
+                "error_corto": short_error(self.last_error) if st == "sin_conexion" else "",
                 "nivel": round(level, 1) if st == "audio" else -100,
                 "sin_audio_seg": int(max(0, t - last_sound))}
 
@@ -868,7 +946,9 @@ class Monitor:
 
     # ---- configuración ----
     def apply(self):
+        global MONITOR_KEY
         with self.lock:
+            MONITOR_KEY = self.cfg.get("clave_monitor", "")
             t = self.cfg["telegram"]
             if os.getenv("MONITOR_SIN_ALERTAS"):
                 # Modo prueba: no enviar nada a Telegram ni por correo
@@ -1009,14 +1089,30 @@ class Monitor:
                 "correo": self.mail.enabled,
                 "estaciones": sts}
 
+    def diagnostico(self) -> str:
+        """Texto con el estado detallado de cada stream (para enviar a soporte)."""
+        t = time.monotonic()
+        lines = [f"Diagnóstico {now_str()}", f"ffmpeg: {self.ffmpeg or 'NO ENCONTRADO'}",
+                 f"curl: {CURL or 'no disponible'}", f"internet: {'sí' if self.net.ok else 'NO'}", ""]
+        with self.lock:
+            for st in self.stations.values():
+                lines.append(f"== {st.name}")
+                for s in st.streams:
+                    lines.append(f"  {s.label}: {s.state(t)}  (forma: {s.method or '-'})  {s.url}")
+                    for m, e in s.errors.items():
+                        lines.append(f"     {m}: {e}")
+        return "\n".join(lines)
+
     def handle_command(self, cmd: str) -> str | None:
         t = time.monotonic()
         if cmd in ("/estado", "/status", "/start"):
             with self.lock:
                 body = "\n\n".join(st.status_text(t) for st in self.stations.values())
             return "📻 <b>Estado</b> " + now_str() + "\n\n" + (body or "Sin estaciones")
+        if cmd in ("/diagnostico", "/diag"):
+            return "<pre>" + html.escape(self.diagnostico()[:3800]) + "</pre>"
         if cmd in ("/ayuda", "/help"):
-            return "/estado - estado de todas las estaciones"
+            return "/estado - estado de todas las estaciones\n/diagnostico - detalle de conexión de cada stream"
         return None
 
     # ---- bucle principal ----

@@ -741,7 +741,7 @@ class StationCard(QWidget):
         else:
             p.setFont(font(fpx * 0.92, QFont.Weight.Medium))
             p.setPen(col)
-            lbl = STREAM_LABEL.get(st, "")
+            lbl = s.get("error_corto") or STREAM_LABEL.get(st, "")
             tw = QFontMetricsF(p.font()).horizontalAdvance(lbl)
             p.drawText(QRectF(r.right() - tw - r.height() * 0.45, r.top(), tw + 2, r.height()),
                        Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, lbl)
@@ -1708,6 +1708,18 @@ class SettingsDialog(QDialog):
         self.autostart.setChecked(autostart_enabled())
         self.autostart.toggled.connect(self.toggle_autostart)
         v.addWidget(self.autostart)
+        diag_row = QHBoxLayout()
+        diag = QPushButton("Copiar diagnóstico")
+        diag.setObjectName("ghost")
+        diag.setToolTip("Copia el detalle de conexión y el registro para enviarlo a soporte")
+        diag.clicked.connect(self.copy_diag)
+        key = QLabel(f"Clave del monitor (encabezado X-Monitor-Clave): {self.mon.cfg.get('clave_monitor', '')}")
+        key.setObjectName("muted")
+        key.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        diag_row.addWidget(diag)
+        diag_row.addSpacing(10)
+        diag_row.addWidget(key, 1)
+        v.addLayout(diag_row)
         row = QHBoxLayout()
         save = QPushButton("Guardar")
         save.clicked.connect(self.save_adv)
@@ -1730,6 +1742,16 @@ class SettingsDialog(QDialog):
             self.autostart.blockSignals(False)
         else:
             self.adv_msg.setText("Se abrirá al iniciar Windows." if on else "Ya no se abrirá al iniciar Windows.")
+
+    def copy_diag(self):
+        text = self.mon.diagnostico()
+        try:
+            with open(motor.LOG_FILE, "r", encoding="utf-8", errors="ignore") as f:
+                text += "\n\n--- Registro (últimas líneas) ---\n" + "".join(f.readlines()[-60:])
+        except OSError:
+            pass
+        QApplication.clipboard().setText(text)
+        self.adv_msg.setText("Diagnóstico copiado. Pégalo en el chat (Ctrl+V).")
 
     def save_adv(self):
         self.mon.set_general({k: sb.value() for k, sb in self.adv.items()})

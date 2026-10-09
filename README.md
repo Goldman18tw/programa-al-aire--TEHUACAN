@@ -30,7 +30,22 @@ directo en el Escritorio. Ver `MonitorAlAire_Windows/LEEME.txt`.
 - **Avanzado**: tiempos de alerta y la opción *Abrir al iniciar Windows*.
 - Si cierras la ventana, el monitor sigue vigilando y queda junto al reloj de
   Windows. Para cerrarlo: clic derecho en ese icono → *Salir*.
-- En Telegram, `/estado` te dice cómo está cada estación.
+- En Telegram, `/estado` te dice cómo está cada estación y `/diagnostico` el
+  detalle de conexión de cada stream (qué forma de conectar usa y por qué falla).
+- Si un stream no conecta, la tarjeta dice el motivo (por ejemplo *Bloqueado (403)*).
+  En **Avanzado → Copiar diagnóstico** copias el detalle para enviarlo.
+
+## Streams detrás de Cloudflare (`https://….radiobuap.com.mx`)
+
+Esos dominios tienen la protección anti-bots de Cloudflare, que puede bloquear a
+programas como este (error 403). El monitor prueba tres formas de conectar
+(ffmpeg, conexión de Windows y `curl.exe`) y se queda con la que funcione.
+Si aun así Cloudflare lo bloquea, en el panel de Cloudflare de radiobuap.com.mx
+crea una regla en **Security → WAF → Custom rules**:
+
+- Cuando: *Request Header* `X-Monitor-Clave` *equals* la clave que aparece en
+  **Avanzado** del monitor.
+- Acción: **Skip** (marcar *All Super Bot Fight Mode Rules* y *Browser Integrity Check*).
 
 ## Cómo decide que una estación está fuera del aire
 
