@@ -3,7 +3,10 @@
 Programa de escritorio para Windows que vigila los streams de las estaciones y
 avisa por **Telegram** cuando una estación se sale del aire de verdad.
 
-![Vista principal](capturas/1_grande.png)
+![Estados: al aire, fuera del aire y un stream caído](capturas/0_estados.png)
+
+Ya viene configurado con Puebla, Lobo Radio, Tehuacán y Chignahuapan, cada uno con
+su logo, su stream principal y su respaldo (Lobo Radio solo tiene principal).
 
 ## Descargar e instalar
 
@@ -21,7 +24,7 @@ directo en el Escritorio. Ver `MonitorAlAire_Windows/LEEME.txt`.
 ## Cómo se usa
 
 - **Engrane → Estaciones**: primero crea la estación y luego agrégale sus
-  streams pegando la URL.
+  streams pegando la URL. Ahí mismo eliges su logo (imagen o URL).
 - **Telegram**: pega el token de tu bot (lo da @BotFather), escríbele al bot y
   presiona *Detectar chats*. Con *Enviar prueba* verificas que sí llegue.
 - **Avanzado**: tiempos de alerta y la opción *Abrir al iniciar Windows*.
@@ -32,7 +35,8 @@ directo en el Escritorio. Ver `MonitorAlAire_Windows/LEEME.txt`.
 ## Cómo decide que una estación está fuera del aire
 
 - La estación está **FUERA DEL AIRE** solo si **ninguno** de sus streams tiene
-  audio durante 90 s, ya sea por silencio o por falta de conexión.
+  audio durante 90 s, ya sea por silencio o por falta de conexión. Se considera
+  silencio por debajo de -60 dB (el aire real anda entre -45 y -15 dB).
 - Para avisar que **volvió** se necesitan 15 s de audio continuo.
 - Si se cae solo **un** stream, manda un aviso aparte a los 5 min.
 - Si la PC del monitor se queda sin internet o se suspende, no manda
@@ -42,7 +46,7 @@ directo en el Escritorio. Ver `MonitorAlAire_Windows/LEEME.txt`.
 
 | Laptop | Ventana pequeña | Configuración |
 |---|---|---|
-| ![](capturas/2_laptop.png) | ![](capturas/3_pequena.png) | ![](capturas/5_config_estaciones.png) |
+| ![](capturas/2_laptop.png) | ![](capturas/4_mini.png) | ![](capturas/5_config_estaciones.png) |
 
 ## Estructura
 

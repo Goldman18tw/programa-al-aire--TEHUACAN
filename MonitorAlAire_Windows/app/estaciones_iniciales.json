@@ -1,0 +1,35 @@
+{
+  "estaciones": [
+    {
+      "nombre": "Puebla",
+      "logo": "logos/puebla.png",
+      "streams": [
+        {"nombre": "Principal", "url": "https://puebla.radiobuap.com.mx/stream"},
+        {"nombre": "Respaldo", "url": "http://148.228.50.35:8000"}
+      ]
+    },
+    {
+      "nombre": "Lobo Radio",
+      "logo": "logos/lobo.png",
+      "streams": [
+        {"nombre": "Principal", "url": "https://loboradio.radiobuap.com.mx/stream"}
+      ]
+    },
+    {
+      "nombre": "Tehuacán",
+      "logo": "logos/tehuacan.png",
+      "streams": [
+        {"nombre": "Principal", "url": "https://tehuacan.radiobuap.com.mx/stream"},
+        {"nombre": "Respaldo", "url": "http://187.141.99.161:8000"}
+      ]
+    },
+    {
+      "nombre": "Chignahuapan",
+      "logo": "logos/chignahuapan.png",
+      "streams": [
+        {"nombre": "Principal", "url": "https://chignahuapan.radiobuap.com.mx/stream"},
+        {"nombre": "Respaldo", "url": "http://148.228.50.33:8000"}
+      ]
+    }
+  ]
+}

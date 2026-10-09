@@ -6,22 +6,25 @@ del aire), icono junto al reloj de Windows y configuración sencilla:
 primero se crean las estaciones y luego se les agregan sus streams.
 """
 
+import hashlib
 import math
 import os
 import random
 import subprocess
 import sys
+import threading
 import time
+import urllib.request
 
 # El Python portátil no agrega la carpeta del script a sys.path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from PySide6.QtCore import (QPointF, QRectF, QSize, Qt, QTimer, Signal)
 from PySide6.QtGui import (QAction, QBrush, QColor, QFont, QFontDatabase, QFontMetricsF,
-                           QIcon, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap,
+                           QIcon, QImage, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap,
                            QRadialGradient)
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
-from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QDoubleSpinBox, QFrame, QHBoxLayout,
+from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QFileDialog, QDoubleSpinBox, QFrame, QHBoxLayout,
                                QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow,
                                QMenu, QMessageBox, QPushButton, QScrollArea, QSizePolicy,
                                QStackedWidget, QSystemTrayIcon, QVBoxLayout, QWidget,
@@ -244,6 +247,209 @@ def draw_emblem(p: QPainter, cx: float, cy: float, R: float, state: str, t: floa
         p.drawArc(QRectF(cx - rr, cy - rr, 2 * rr, 2 * rr), int(-t * 260 * 16) % (360 * 16), 70 * 16)
 
 
+class LogoCache:
+    """Carga los logos de las estaciones (archivo local o URL) y guarda versiones
+    redondas ya escaladas para no recalcularlas en cada cuadro de la animación."""
+
+    def __init__(self):
+        self.images: dict[str, QImage | None] = {}
+        self.pixmaps: dict[tuple, QPixmap] = {}
+        self.lock = threading.Lock()
+
+    @staticmethod
+    def local_path(logo: str) -> str | None:
+        if not logo:
+            return None
+        if logo.startswith(("http://", "https://")):
+            ext = os.path.splitext(logo.split("?")[0])[1][:5] or ".img"
+            return os.path.join(motor.DATA_DIR, "logos",
+                                "url_" + hashlib.md5(logo.encode()).hexdigest()[:12] + ext)
+        if os.path.isabs(logo):
+            return logo
+        for base in (motor.DATA_DIR, motor.APP_DIR):
+            path = os.path.join(base, logo)
+            if os.path.exists(path):
+                return path
+        return os.path.join(motor.APP_DIR, logo)
+
+    def image(self, logo: str) -> QImage | None:
+        if not logo:
+            return None
+        with self.lock:
+            if logo in self.images:
+                return self.images[logo]
+            self.images[logo] = None
+        path = self.local_path(logo)
+        if os.path.exists(path):
+            self._load(logo, path)
+        elif logo.startswith(("http://", "https://")):
+            threading.Thread(target=self._download, args=(logo, path), daemon=True).start()
+        return self.images.get(logo)
+
+    def _load(self, logo: str, path: str):
+        img = QImage(path)
+        if img.isNull():
+            return
+        if img.width() > 600:
+            img = img.scaled(600, 600, Qt.AspectRatioMode.KeepAspectRatio,
+                             Qt.TransformationMode.SmoothTransformation)
+        with self.lock:
+            self.images[logo] = img.convertToFormat(QImage.Format.Format_ARGB32_Premultiplied)
+
+    def _download(self, logo: str, path: str):
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            req = urllib.request.Request(logo, headers={"User-Agent": "MonitorAlAire"})
+            with urllib.request.urlopen(req, timeout=20) as r:
+                data = r.read()
+            with open(path, "wb") as f:
+                f.write(data)
+            self._load(logo, path)
+        except Exception as e:
+            motor.log.warning(f"No se pudo descargar el logo {logo}: {e}")
+            with self.lock:
+                self.images.pop(logo, None)  # se reintentará más tarde
+
+    def forget(self, logo: str):
+        with self.lock:
+            self.images.pop(logo, None)
+            self.pixmaps = {k: v for k, v in self.pixmaps.items() if k[0] != logo}
+
+    def round_pixmap(self, logo: str, diameter: float, gray: bool, dpr: float) -> QPixmap | None:
+        img = self.image(logo)
+        if img is None or diameter < 4:
+            return None
+        px = max(4, int(round(diameter * dpr)))
+        key = (logo, px, gray)
+        pm = self.pixmaps.get(key)
+        if pm is None:
+            src = img
+            if gray:
+                src = img.convertToFormat(QImage.Format.Format_Grayscale8).convertToFormat(
+                    QImage.Format.Format_ARGB32_Premultiplied)
+            # Acercar al centro del logo (los bordes suelen ser decoración)
+            zoom = int(px * 1.28)
+            src = src.scaled(zoom, zoom, Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                             Qt.TransformationMode.SmoothTransformation)
+            pm = QPixmap(px, px)
+            pm.fill(Qt.GlobalColor.transparent)
+            q = QPainter(pm)
+            q.setRenderHint(QPainter.RenderHint.Antialiasing)
+            q.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+            clip = QPainterPath()
+            clip.addEllipse(QRectF(0, 0, px, px))
+            q.setClipPath(clip)
+            q.fillRect(QRectF(0, 0, px, px), QColor("white"))
+            q.drawImage(QPointF((px - src.width()) / 2, (px - src.height()) / 2), src)
+            q.end()
+            pm.setDevicePixelRatio(dpr)
+            if len(self.pixmaps) > 200:
+                self.pixmaps.clear()
+            self.pixmaps[key] = pm
+        return pm
+
+
+LOGOS = LogoCache()
+
+
+def draw_broadcast_icon(p: QPainter, cx: float, cy: float, R: float, alpha: int, slash: bool):
+    white = QColor(255, 255, 255, alpha)
+    pen_w = max(1.2, R * 0.12)
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(white)
+    p.drawEllipse(QPointF(cx, cy), R * 0.16, R * 0.16)
+    p.setPen(QPen(white, pen_w, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    for rr in (0.42, 0.7):
+        rect = QRectF(cx - R * rr, cy - R * rr, 2 * R * rr, 2 * R * rr)
+        p.drawArc(rect, int(-42 * 16), int(84 * 16))
+        p.drawArc(rect, int(138 * 16), int(84 * 16))
+    if slash:
+        p.drawLine(QPointF(cx - R * 0.62, cy - R * 0.62), QPointF(cx + R * 0.62, cy + R * 0.62))
+
+
+def draw_logo_emblem(p: QPainter, cx: float, cy: float, R: float, state: str, t: float,
+                     logo: str) -> bool:
+    """Emblema con el logo de la estación. Devuelve False si el logo aún no está listo."""
+    dpr = p.device().devicePixelRatioF() if p.device() else 1.0
+    gray = state in ("fuera", "conectando", "sin_streams")
+    inner = R * 0.86
+    pm = LOGOS.round_pixmap(logo, inner * 2, gray, dpr)
+    if pm is None:
+        return False
+    col = STATE_COLOR.get(state, STATE_COLOR["conectando"])
+    on = state in ("aire", "parcial")
+
+    # Resplandor y ondas (igual que el emblema dibujado)
+    breathe = 0.5 + 0.5 * math.sin(t * 2.2) if state == "fuera" else 1.0
+    glow_a = {"aire": 70, "parcial": 60, "verificando": 45, "fuera": 40 + 50 * breathe}.get(state, 18)
+    g = QRadialGradient(QPointF(cx, cy), R * 2.5)
+    g.setColorAt(0.0, with_alpha(col, glow_a))
+    g.setColorAt(0.45, with_alpha(col, glow_a * 0.35))
+    g.setColorAt(1.0, with_alpha(col, 0))
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(QBrush(g))
+    p.drawEllipse(QPointF(cx, cy), R * 2.5, R * 2.5)
+    if on:
+        for i in range(3):
+            ph = (t / 2.7 + i / 3.0) % 1.0
+            r = R * (1.04 + ph * 1.3)
+            p.setPen(QPen(with_alpha(col, (1 - ph) ** 1.8 * 150), max(1.0, R * 0.03)))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawEllipse(QPointF(cx, cy), r, r)
+
+    # Aro de color del estado
+    ring = QRadialGradient(QPointF(cx - R * 0.4, cy - R * 0.5), R * 2.2)
+    ring.setColorAt(0, col.lighter(135))
+    ring.setColorAt(1, col.darker(170))
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(QBrush(ring) if state not in ("conectando", "sin_streams") else QColor("#39425F"))
+    p.drawEllipse(QPointF(cx, cy), R, R)
+
+    # Logo
+    p.save()
+    if state == "conectando":
+        p.setOpacity(0.55)
+    p.drawPixmap(QRectF(cx - inner, cy - inner, inner * 2, inner * 2), pm, QRectF(pm.rect()))
+    p.restore()
+    if state == "fuera":
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(60, 0, 12, 70 + int(40 * breathe)))
+        p.drawEllipse(QPointF(cx, cy), inner, inner)
+    # Brillo sutil
+    hl = QLinearGradient(QPointF(cx, cy - inner), QPointF(cx, cy))
+    hl.setColorAt(0, QColor(255, 255, 255, 40))
+    hl.setColorAt(1, QColor(255, 255, 255, 0))
+    p.setBrush(QBrush(hl))
+    p.drawEllipse(QPointF(cx, cy), inner, inner)
+
+    # Insignia de estado (abajo a la derecha)
+    if state in ("fuera", "parcial", "verificando", "aire"):
+        bx, by = cx + R * 0.71, cy + R * 0.71
+        br = R * 0.27
+        p.setPen(QPen(QColor("#0E1428"), max(1.5, R * 0.05)))
+        p.setBrush(col)
+        p.drawEllipse(QPointF(bx, by), br, br)
+        if state == "fuera":
+            draw_broadcast_icon(p, bx, by, br * 0.9, 250, True)
+        elif state == "aire":
+            draw_broadcast_icon(p, bx, by, br * 0.9, 250, False)
+        else:
+            p.setPen(QPen(QColor(255, 255, 255, 250), max(1.2, br * 0.2), Qt.PenStyle.SolidLine,
+                          Qt.PenCapStyle.RoundCap))
+            p.drawLine(QPointF(bx, by - br * 0.45), QPointF(bx, by + br * 0.08))
+            p.drawPoint(QPointF(bx, by + br * 0.45))
+
+    # Indicador giratorio (conectando / verificando)
+    if state in ("conectando", "verificando"):
+        p.setPen(QPen(with_alpha(col, 230), max(1.5, R * 0.05), Qt.PenStyle.SolidLine,
+                      Qt.PenCapStyle.RoundCap))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        rr = R * 1.12
+        p.drawArc(QRectF(cx - rr, cy - rr, 2 * rr, 2 * rr), int(-t * 260 * 16) % (360 * 16), 70 * 16)
+    return True
+
+
 def make_icon(state: str, size=256) -> QIcon:
     icon = QIcon()
     for s in (16, 24, 32, 48, 64, 128, 256):
@@ -295,15 +501,6 @@ class StationCard(QWidget):
         p.setClipPath(path)
 
         streams = d.get("streams", [])
-        pad = clamp(min(w, h) * 0.065, 12, 26)
-
-        # Zona de streams (abajo)
-        n = len(streams)
-        row_h = clamp(h * 0.085, 26, 38)
-        gap = clamp(h * 0.018, 4, 8)
-        name_px = clamp(min(w * 0.072, h * 0.08), 13, 32)
-        pill_px = clamp(name_px * 0.44, 9.5, 13.5)
-        sub_px = clamp(name_px * 0.5, 10.5, 14)
         sub = ""
         if state == "fuera":
             sub = f"Desde las {d.get('fuera_desde', '')[:5]} · {fmt_dur(d.get('fuera_seg', 0))}"
@@ -312,9 +509,39 @@ class StationCard(QWidget):
             sub = f"{bad} stream con falla" if bad == 1 else f"{bad} streams con falla"
         elif state == "sin_streams":
             sub = "Agrégale streams en Configuración"
+
+        # Tarjeta ancha: logo a la izquierda y datos a la derecha
+        if w > h * 1.3 and h >= 140:
+            self._paint_horizontal(p, w, h, d, state, col, card, streams, sub, t)
+        else:
+            self._paint_vertical(p, w, h, d, state, col, card, streams, sub, t)
+
+        p.restore()
+        # Borde
+        border = QLinearGradient(QPointF(0, 0), QPointF(0, h))
+        if state == "fuera":
+            border.setColorAt(0, with_alpha(col, 200))
+            border.setColorAt(1, with_alpha(col, 70))
+        else:
+            border.setColorAt(0, QColor(255, 255, 255, 34))
+            border.setColorAt(1, QColor(255, 255, 255, 8))
+        p.setPen(QPen(QBrush(border), 1.2 if state == "fuera" else 1))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRoundedRect(card, rad, rad)
+        p.end()
+
+    def _paint_vertical(self, p, w, h, d, state, col, card, streams, sub, t):
+        pad = clamp(min(w, h) * 0.065, 12, 26)
+        n = len(streams)
+        row_h = clamp(h * 0.085, 26, 38)
+        gap = clamp(h * 0.018, 4, 8)
+        base_px = clamp(min(w * 0.072, h * 0.08), 13, 32)
+        name_px = self._fit_name_px(base_px, w - 2 * pad)
+        pill_px = clamp(base_px * 0.44, 9.5, 13.5)
+        sub_px = clamp(base_px * 0.5, 10.5, 14)
         # Si no cabe todo, se compacta por pasos (nunca se encima ni se corta):
         # 1) streams como filas  2) streams como puntos  3) sin subtítulo  4) sin streams
-        min_emblem = 16 * 2.9
+        min_emblem = 16 * 2.5
         for level in range(4):
             compact_streams = level >= 1
             show_sub = level < 2
@@ -332,36 +559,117 @@ class StationCard(QWidget):
                 break
         if not show_sub:
             sub = ""
-        R = clamp(min(hero.width() * 0.2, (hero.height() - text_block) / 2.9), 8, 120)
-        total = R * 2.9 + text_block
+        R = clamp(min(hero.width() * 0.26, (hero.height() - text_block) / 2.5), 8, 150)
+        total = R * 2.5 + text_block
         top = hero.top() + max(0, (hero.height() - total) / 2)
-        cx, cy = w / 2, top + R * 1.45
+        cx, cy = w / 2, top + R * 1.25
+        self._paint_glow(p, card, cx, cy, w, h, state, col)
+        if not draw_logo_emblem(p, cx, cy, R, state, t, d.get("logo", "")):
+            draw_emblem(p, cx, cy, R, state, t)
 
-        # Resplandor de fondo en el color del estado
+        y = cy + R * 1.25 + name_px * 0.55
+        self._draw_name(p, QRectF(pad, y, w - 2 * pad, name_px * 1.3), name_px,
+                        Qt.AlignmentFlag.AlignCenter)
+        y += name_px * 1.3 + name_px * 0.35
+        ph = self._draw_pill(p, cx, y, state, col, pill_px, t, centered=True)
+        y += ph + sub_px * 0.6
+        if sub:
+            self._draw_sub(p, QRectF(pad, y, w - 2 * pad, sub_px * 1.5), sub, sub_px, state,
+                           Qt.AlignmentFlag.AlignCenter)
+        if show_streams:
+            sy = h - pad - streams_h
+            if compact_streams:
+                self._draw_streams_compact(p, QRectF(pad, sy, w - 2 * pad, streams_h), streams)
+            else:
+                for i, s in enumerate(streams):
+                    self._draw_stream_row(p, QRectF(pad, sy + i * (row_h + gap), w - 2 * pad, row_h), s, t)
+
+    def _paint_horizontal(self, p, w, h, d, state, col, card, streams, sub, t):
+        pad = clamp(h * 0.08, 14, 30)
+        n = len(streams)
+        left_w = min(h - 2 * pad, w * 0.38)
+        R = clamp(min(left_w * 0.35, (h - 2 * pad) * 0.35), 10, 150)
+        cx, cy = pad + left_w / 2, h / 2
+        self._paint_glow(p, card, cx, cy, w, h, state, col)
+        if not draw_logo_emblem(p, cx, cy, R, state, t, d.get("logo", "")):
+            draw_emblem(p, cx, cy, R, state, t)
+
+        x0 = pad + left_w + pad * 0.4
+        rw = w - x0 - pad
+        base_px = clamp(min(rw * 0.1, h * 0.09), 13, 34)
+        name_px = self._fit_name_px(base_px, rw)
+        pill_px = clamp(base_px * 0.46, 9.5, 14)
+        sub_px = clamp(base_px * 0.52, 11, 15)
+        row_h = clamp(h * 0.105, 24, 40)
+        gap = clamp(h * 0.022, 4, 8)
+        head_h = name_px * 1.3 + name_px * 0.3 + pill_px * 2.3
+        for level in range(4):
+            show_sub = bool(sub) and level < 2
+            compact = level >= 1
+            show_streams = n > 0 and level < 3
+            if not show_streams:
+                st_h = 0
+            elif compact:
+                st_h = clamp(h * 0.09, 14, 22)
+            else:
+                st_h = n * row_h + (n - 1) * gap
+            total = head_h + (sub_px * 1.9 if show_sub else 0) + ((pad * 0.7 + st_h) if show_streams else 0)
+            if total <= h - 2 * pad:
+                break
+        y = max(pad, (h - total) / 2)
+        self._draw_name(p, QRectF(x0, y, rw, name_px * 1.3), name_px,
+                        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        y += name_px * 1.3 + name_px * 0.3
+        ph = self._draw_pill(p, x0, y, state, col, pill_px, t, centered=False)
+        y += ph
+        if show_sub:
+            y += sub_px * 0.4
+            self._draw_sub(p, QRectF(x0, y, rw, sub_px * 1.5), sub, sub_px, state,
+                           Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            y += sub_px * 1.5
+        if show_streams:
+            y += pad * 0.7
+            if compact:
+                self._draw_streams_compact(p, QRectF(x0, y, min(rw, 160), st_h), streams)
+            else:
+                for i, s in enumerate(streams):
+                    self._draw_stream_row(p, QRectF(x0, y + i * (row_h + gap), rw, row_h), s, t)
+
+    def _paint_glow(self, p, card, cx, cy, w, h, state, col):
         bgl = QRadialGradient(QPointF(cx, cy), max(w, h) * 0.75)
         bgl.setColorAt(0, with_alpha(col, 34 if state != "fuera" else 46))
         bgl.setColorAt(1, with_alpha(col, 0))
         p.fillRect(card, QBrush(bgl))
 
-        draw_emblem(p, cx, cy, R, state, t)
+    def _fit_name_px(self, px: float, width: float) -> float:
+        """Reduce la letra del nombre para que quepa completo (hasta 60%)."""
+        tw = QFontMetricsF(font(px, QFont.Weight.DemiBold, display=True)).horizontalAdvance(
+            self.data.get("nombre", ""))
+        if tw > width > 0:
+            px = max(px * 0.6, px * width / tw * 0.98)
+        return px
 
-        # Nombre
-        y = cy + R * 1.45 + name_px * 0.55
-        p.setFont(font(name_px, QFont.Weight.DemiBold, display=True))
-        fm = QFontMetricsF(p.font())
-        name = fm.elidedText(d.get("nombre", ""), Qt.TextElideMode.ElideRight, w - 2 * pad)
+    def _draw_name(self, p, rect: QRectF, px: float, align):
+        p.setFont(font(px, QFont.Weight.DemiBold, display=True))
+        name = QFontMetricsF(p.font()).elidedText(self.data.get("nombre", ""),
+                                                   Qt.TextElideMode.ElideRight, rect.width())
         p.setPen(C_TEXT)
-        p.drawText(QRectF(pad, y, w - 2 * pad, name_px * 1.3), Qt.AlignmentFlag.AlignCenter, name)
-        y += name_px * 1.3 + name_px * 0.35
+        p.drawText(rect, align, name)
 
-        # Pastilla de estado
+    def _draw_sub(self, p, rect: QRectF, text: str, px: float, state: str, align):
+        p.setFont(font(px, QFont.Weight.Medium))
+        p.setPen(C_MUTED if state != "fuera" else QColor("#FFA3B1"))
+        p.drawText(rect, align, text)
+
+    def _draw_pill(self, p, x: float, y: float, state: str, col: QColor, pill_px: float,
+                   t: float, centered: bool) -> float:
         pf = font(pill_px, QFont.Weight.Bold, spacing=pill_px * 0.12)
         p.setFont(pf)
         label = STATE_LABEL.get(state, state.upper())
         tw = QFontMetricsF(pf).horizontalAdvance(label)
         ph = pill_px * 2.3
         pw = tw + pill_px * 3.4
-        pill = QRectF(cx - pw / 2, y, pw, ph)
+        pill = QRectF(x - pw / 2 if centered else x, y, pw, ph)
         p.setPen(QPen(with_alpha(col, 90), 1))
         p.setBrush(with_alpha(col, 30))
         p.drawRoundedRect(pill, ph / 2, ph / 2)
@@ -378,38 +686,10 @@ class StationCard(QWidget):
         p.setPen(col)
         p.drawText(QRectF(pill.left() + pill_px * 2.0, pill.top(), tw + pill_px, ph),
                    Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, label)
-        y += ph + sub_px * 0.6
-
-        if sub:
-            p.setFont(font(sub_px, QFont.Weight.Medium))
-            p.setPen(C_MUTED if state != "fuera" else QColor("#FFA3B1"))
-            p.drawText(QRectF(pad, y, w - 2 * pad, sub_px * 1.5), Qt.AlignmentFlag.AlignCenter, sub)
-
-        # Streams
-        if show_streams:
-            sy = h - pad - streams_h
-            if compact_streams:
-                self._draw_streams_compact(p, QRectF(pad, sy, w - 2 * pad, streams_h), streams)
-            else:
-                for i, s in enumerate(streams):
-                    self._draw_stream_row(p, QRectF(pad, sy + i * (row_h + gap), w - 2 * pad, row_h), s, t)
-
-        p.restore()
-        # Borde
-        border = QLinearGradient(QPointF(0, 0), QPointF(0, h))
-        if state == "fuera":
-            border.setColorAt(0, with_alpha(col, 200))
-            border.setColorAt(1, with_alpha(col, 70))
-        else:
-            border.setColorAt(0, QColor(255, 255, 255, 34))
-            border.setColorAt(1, QColor(255, 255, 255, 8))
-        p.setPen(QPen(QBrush(border), 1.2 if state == "fuera" else 1))
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.drawRoundedRect(card, rad, rad)
-        p.end()
+        return ph
 
     def _level(self, s: dict) -> float:
-        target = clamp((s["nivel"] + 55) / 45, 0, 1) if s["estado"] == "audio" else 0.0
+        target = clamp((s["nivel"] + 55) / 35, 0.2, 1) if s["estado"] == "audio" else 0.0
         cur = self.levels.get(s["id"], 0.0)
         cur += (target - cur) * 0.18
         self.levels[s["id"]] = cur
@@ -433,14 +713,16 @@ class StationCard(QWidget):
         vis = QRectF(r.right() - vis_w - r.height() * 0.4, r.top() + r.height() * 0.24,
                      vis_w, r.height() * 0.52)
         lvl = self._level(s)
-        if st == "audio" or lvl > 0.02:
+        if (st == "audio" or lvl > 0.02) and r.width() < 170:
+            text_right = r.right() - r.height() * 0.4  # fila angosta: sin barras
+        elif st == "audio" or lvl > 0.02:
             bars = int(clamp(vis_w / 6, 8, 22))
             bw = vis.width() / bars
             for i in range(bars):
                 k = i / max(1, bars - 1)
-                wob = 0.55 + 0.45 * math.sin(t * 7.3 + i * 1.7 + self.seed) * math.sin(t * 3.1 + i * 0.6)
-                env = math.sin(math.pi * (0.15 + 0.7 * k))
-                bh = max(2.0, vis.height() * clamp(lvl * env * (0.45 + 0.55 * wob), 0.08, 1.0))
+                wob = abs(math.sin(t * 6.1 + i * 1.7 + self.seed) * 0.6 + math.sin(t * 2.3 + i * 0.9) * 0.4)
+                env = 0.55 + 0.45 * math.sin(math.pi * (0.1 + 0.8 * k))
+                bh = max(2.0, vis.height() * clamp(lvl * env * (0.35 + 0.65 * wob), 0.1, 1.0))
                 br = QRectF(vis.left() + i * bw + bw * 0.22, vis.center().y() - bh / 2, bw * 0.56, bh)
                 p.setBrush(with_alpha(col, 120 + 135 * k * lvl))
                 p.drawRoundedRect(br, bw * 0.28, bw * 0.28)
@@ -985,6 +1267,21 @@ class SettingsDialog(QDialog):
         top.addWidget(self.st_title, 1)
         top.addWidget(self.del_st)
         dv.addLayout(top)
+        logo_row = QHBoxLayout()
+        logo_row.setSpacing(10)
+        self.logo_prev = QLabel()
+        self.logo_prev.setFixedSize(48, 48)
+        self.logo_url = QLineEdit()
+        self.logo_url.setPlaceholderText("Logo: pega la URL o elige una imagen")
+        self.logo_url.editingFinished.connect(self.set_logo_url)
+        pick = QPushButton("Elegir imagen…")
+        pick.setObjectName("ghost")
+        pick.setCursor(Qt.CursorShape.PointingHandCursor)
+        pick.clicked.connect(self.pick_logo)
+        logo_row.addWidget(self.logo_prev)
+        logo_row.addWidget(self.logo_url, 1)
+        logo_row.addWidget(pick)
+        dv.addLayout(logo_row)
         lbl = QLabel("Streams")
         lbl.setObjectName("h2")
         dv.addWidget(lbl)
@@ -1059,6 +1356,8 @@ class SettingsDialog(QDialog):
             return
         self.right.setCurrentIndex(0)
         self.st_title.setText(st["nombre"])
+        self.logo_url.setText(st.get("logo", ""))
+        self._refresh_logo_preview(st.get("logo", ""))
         while self.streams_box.count():
             it = self.streams_box.takeAt(0)
             if it.widget():
@@ -1076,6 +1375,45 @@ class SettingsDialog(QDialog):
             r.renamed.connect(lambda sid, name, stid=st["id"]: self.mon.update_stream(stid, sid, nombre=name))
             self.streams_box.addWidget(r)
         self.streams_box.addStretch(1)
+
+    def _refresh_logo_preview(self, logo: str, tries: int = 0):
+        pm = LOGOS.round_pixmap(logo, 48, False, self.devicePixelRatioF()) if logo else None
+        if pm is None:
+            pm = make_icon("conectando").pixmap(QSize(48, 48))
+            if logo and tries < 20:  # puede estar descargándose
+                QTimer.singleShot(500, lambda: self._refresh_logo_preview(logo, tries + 1))
+        self.logo_prev.setPixmap(pm)
+
+    def set_logo_url(self):
+        st = self.current_station()
+        if not st:
+            return
+        logo = self.logo_url.text().strip()
+        if logo != st.get("logo", ""):
+            LOGOS.forget(logo)
+            self.mon.set_station_logo(st["id"], logo)
+            self._refresh_logo_preview(logo)
+
+    def pick_logo(self):
+        st = self.current_station()
+        if not st:
+            return
+        path, _ = QFileDialog.getOpenFileName(self, "Elegir logo", "",
+                                              "Imágenes (*.png *.jpg *.jpeg *.webp *.bmp)")
+        if not path:
+            return
+        img = QImage(path)
+        if img.isNull():
+            QMessageBox.warning(self, "Logo", "No se pudo abrir esa imagen.")
+            return
+        img = img.scaled(512, 512, Qt.AspectRatioMode.KeepAspectRatio,
+                         Qt.TransformationMode.SmoothTransformation)
+        rel = f"logos/{st['id']}_{int(time.time())}.png"
+        os.makedirs(os.path.join(motor.DATA_DIR, "logos"), exist_ok=True)
+        img.save(os.path.join(motor.DATA_DIR, rel))
+        self.mon.set_station_logo(st["id"], rel)
+        self.logo_url.setText(rel)
+        self._refresh_logo_preview(rel)
 
     def add_station(self):
         name = self.new_name.text().strip()

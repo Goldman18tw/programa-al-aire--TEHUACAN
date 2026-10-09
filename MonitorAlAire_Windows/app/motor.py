@@ -51,9 +51,10 @@ os.makedirs(DATA_DIR, exist_ok=True)
 
 CONFIG_FILE = os.path.join(DATA_DIR, "config_monitor.json")
 LOG_FILE = os.path.join(DATA_DIR, "monitor_aire.log")
+INITIAL_FILE = os.path.join(APP_DIR, "estaciones_iniciales.json")
 
 DEFAULTS = {
-    "umbral_db": -50.0,             # por debajo de esto se considera silencio
+    "umbral_db": -60.0,             # por debajo de esto se considera silencio (silencio real < -70)
     "alerta_tras_segundos": 90,     # estación sin audio en TODOS sus streams
     "recuperacion_segundos": 15,    # audio continuo para declarar "de vuelta al aire"
     "aviso_stream_tras_segundos": 300,  # aviso si solo UN stream está caído (0 = no avisar)
@@ -91,12 +92,14 @@ def new_id() -> str:
 
 def load_config() -> dict:
     cfg = {}
-    if os.path.exists(CONFIG_FILE):
+    # La primera vez se cargan las estaciones que trae el programa
+    path = CONFIG_FILE if os.path.exists(CONFIG_FILE) else INITIAL_FILE
+    if os.path.exists(path):
         try:
-            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 cfg = json.load(f) or {}
         except Exception as e:
-            log.error(f"No pude leer {CONFIG_FILE}: {e}")
+            log.error(f"No pude leer {path}: {e}")
     general = dict(DEFAULTS)
     general.update(cfg.get("general", {}))
     cfg["general"] = general
@@ -106,6 +109,7 @@ def load_config() -> dict:
     cfg.setdefault("estaciones", [])
     for st in cfg["estaciones"]:
         st.setdefault("id", new_id())
+        st.setdefault("logo", "")
         st.setdefault("streams", [])
         for i, s in enumerate(st["streams"]):
             if isinstance(s, str):
@@ -217,6 +221,14 @@ class Telegram:
                                               "parse_mode": "HTML",
                                               "disable_web_page_preview": "true"})
                     break
+                except urllib.error.HTTPError as e:
+                    # 4xx = token o chat incorrectos: reintentar no sirve (salvo 429 = esperar)
+                    if e.code != 429 and 400 <= e.code < 500:
+                        log.error(f"Telegram rechazó el mensaje (HTTP {e.code}); revisa token y chat")
+                        break
+                    log.warning(f"Telegram: error enviando ({e}); reintento en {delay}s")
+                    time.sleep(delay)
+                    delay = min(delay * 2, 60)
                 except Exception as e:
                     if time.time() - created > 6 * 3600 or not self.token:
                         log.error(f"Telegram: se descarta mensaje ({e})")
@@ -434,6 +446,7 @@ class Station:
     def __init__(self, sid: str):
         self.id = sid
         self.name = ""
+        self.logo = ""
         self.streams: list[StreamMonitor] = []
         self.off_air = False
         self.off_since_mono = 0.0
@@ -444,6 +457,7 @@ class Station:
     def apply(self, cfg: dict, general: dict, ffmpeg: str | None):
         """Aplica la configuración conservando los streams que no cambiaron."""
         self.name = cfg["nombre"]
+        self.logo = cfg.get("logo", "")
         g = dict(general)
         g.update({k: v for k, v in cfg.items() if k in DEFAULTS})
         self.alert_after = float(g["alerta_tras_segundos"])
@@ -553,7 +567,7 @@ class Station:
             estado = "parcial"
         else:
             estado = "aire"
-        return {"id": self.id, "nombre": self.name, "estado": estado,
+        return {"id": self.id, "nombre": self.name, "logo": self.logo, "estado": estado,
                 "fuera_desde": self.off_since_wall if self.off_air else None,
                 "fuera_seg": int(t - self.off_since_mono) if self.off_air else 0,
                 "streams": streams}
@@ -644,6 +658,13 @@ class Monitor:
             st = self.find_station_cfg(sid)
             if st and nombre.strip():
                 st["nombre"] = nombre.strip()
+                self.save()
+
+    def set_station_logo(self, sid: str, logo: str):
+        with self.lock:
+            st = self.find_station_cfg(sid)
+            if st is not None:
+                st["logo"] = logo.strip()
                 self.save()
 
     def delete_station(self, sid: str):
