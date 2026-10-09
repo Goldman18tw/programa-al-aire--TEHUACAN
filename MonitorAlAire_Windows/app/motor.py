@@ -70,6 +70,9 @@ CURL = shutil.which("curl.exe" if os.name == "nt" else "curl")
 # Clave opcional que se manda en el encabezado X-Monitor-Clave; sirve para crear una
 # regla en Cloudflare que deje pasar al monitor (ver README).
 MONITOR_KEY = ""
+# Los servidores Shoutcast/Icecast por IP le mandan su página web (no el audio) a
+# quien dice ser navegador; a ellos se les habla como reproductor.
+PLAYER_AGENT = "VLC/3.0.20 LibVLC/3.0.20"
 USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 SAMPLE_RATE = 8000          # suficiente para medir nivel y muy ligero
@@ -539,7 +542,16 @@ class StreamMonitor:
         self.stopped = True
         self._kill()
 
+    def _agent(self) -> str:
+        # HTTPS detrás de Cloudflare: navegador. HTTP directo al servidor: reproductor.
+        return USER_AGENT if self.url.lower().startswith("https://") else PLAYER_AGENT
+
     def _headers(self) -> dict:
+        if not self.url.lower().startswith("https://"):
+            h = {"User-Agent": PLAYER_AGENT, "Accept": "*/*", "Icy-MetaData": "0"}
+            if MONITOR_KEY:
+                h["X-Monitor-Clave"] = MONITOR_KEY
+            return h
         h = {"User-Agent": USER_AGENT, "Accept": "*/*",
              "Accept-Language": "es-MX,es;q=0.9,en;q=0.8", "Icy-MetaData": "0",
              "Referer": "https://radiobuap.mx/", "Connection": "keep-alive"}
@@ -553,7 +565,7 @@ class StreamMonitor:
             extra = "".join(f"{k}: {v}\r\n" for k, v in self._headers().items()
                             if k not in ("User-Agent", "Connection"))
             return [ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error",
-                    "-user_agent", USER_AGENT, "-headers", extra,
+                    "-user_agent", self._agent(), "-headers", extra,
                     "-rw_timeout", "15000000", "-i", self.url] + tail
         return [ffmpeg, "-hide_banner", "-loglevel", "error", "-i", "pipe:0"] + tail
 
@@ -680,7 +692,7 @@ class StreamMonitor:
     def _feed_curl(self, proc: subprocess.Popen, err: list, flags: int):
         """Descarga el stream con curl.exe de Windows y se lo pasa a ffmpeg."""
         cmd = [CURL, "-sS", "-N", "-L", "--fail", "--connect-timeout", "15",
-               "--speed-time", "20", "--speed-limit", "500", "--compressed"]
+               "--speed-time", "20", "--speed-limit", "500"]
         for k, v in self._headers().items():
             cmd += ["-A", v] if k == "User-Agent" else ["-H", f"{k}: {v}"]
         cmd.append(self.url)

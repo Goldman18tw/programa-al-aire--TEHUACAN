@@ -151,6 +151,8 @@ QMenu { background: #121933; border: 1px solid #263055; border-radius: 10px; pad
 QMenu::item { padding: 8px 18px; border-radius: 6px; }
 QMenu::item:selected { background: #1F2850; }
 QMessageBox { background: #0B1020; }
+QToolTip { background: #121933; color: #E7ECF8; border: 1px solid #2A3560; border-radius: 8px;
+           padding: 8px 10px; font-size: 13px; }
 QMessageBox QPushButton { min-width: 80px; }
 """
 
