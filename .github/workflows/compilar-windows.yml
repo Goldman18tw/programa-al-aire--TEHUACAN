@@ -53,6 +53,7 @@ jobs:
           cd MonitorAlAire_Windows/app
           pyinstaller --noconfirm --windowed --name MonitorAlAire --icon icono.ico `
             --add-data "fonts;fonts" --add-data "icono.ico;." `
+            --add-data "logos;logos" --add-data "estaciones_iniciales.json;." `
             --exclude-module tkinter monitor_app.py
           New-Item -ItemType Directory dist\MonitorAlAire\ffmpeg | Out-Null
           Copy-Item ..\..\ffmpeg.exe dist\MonitorAlAire\ffmpeg\
