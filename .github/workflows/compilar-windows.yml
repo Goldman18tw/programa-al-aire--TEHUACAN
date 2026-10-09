@@ -23,13 +23,21 @@ jobs:
         shell: pwsh
         run: |
           $p = Start-Process -FilePath MonitorAlAire_Windows\python\python.exe `
-               -ArgumentList 'MonitorAlAire_Windows\app\monitor_app.py','--autoprueba',"$PWD\captura_portatil.png" `
+               -ArgumentList 'MonitorAlAire_Windows\app\monitor_app.py','--autoprueba',"$PWD\captura_portatil.png",'40' `
                -PassThru -Wait
           if (-not (Test-Path captura_portatil.png)) { Get-Content MonitorAlAire_Windows\datos\monitor_aire.log -ErrorAction SilentlyContinue; exit 1 }
+      - name: Verificar cuenta de correo (solo inicio de sesión, no envía nada)
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          MonitorAlAire_Windows\python\python.exe -c "import json,smtplib,ssl; c=json.load(open('MonitorAlAire_Windows/app/estaciones_iniciales.json',encoding='utf-8'))['correo']; s=smtplib.SMTP(c['servidor'],c['puerto'],timeout=30); s.starttls(context=ssl.create_default_context()); s.login(c['usuario'],c['contrasena']); print('LOGIN CORREO OK'); s.quit()"
       - uses: actions/upload-artifact@v4
         with:
           name: captura-portatil
-          path: captura_portatil.png
+          path: |
+            captura_portatil.png
+            captura_portatil_estado.json
+            MonitorAlAire_Windows/datos/monitor_aire.log
 
   exe:
     name: Crear ejecutable

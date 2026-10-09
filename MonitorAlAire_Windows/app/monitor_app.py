@@ -477,6 +477,17 @@ class StationCard(QWidget):
 
     def set_data(self, d: dict):
         self.data = d
+        lines = []
+        for st in d.get("streams", []):
+            txt = {"audio": "con audio", "silencio": "en silencio", "conectando": "conectando…",
+                   "sin_conexion": "sin conexión"}.get(st["estado"], st["estado"])
+            line = f"{st['nombre']}: {txt}\n   {st['url']}"
+            if st.get("error"):
+                line += f"\n   Motivo: {st['error']}"
+            lines.append(line)
+        tip = "\n".join(lines)
+        if tip != self.toolTip():
+            self.setToolTip(tip)
 
     def paintEvent(self, _):
         t = time.monotonic() + self.seed
@@ -1201,13 +1212,14 @@ class SettingsDialog(QDialog):
         self.nav = QListWidget()
         self.nav.setObjectName("nav")
         self.nav.setFixedWidth(190)
-        for name in ("Estaciones", "Telegram", "Avanzado"):
+        for name in ("Estaciones", "Telegram", "Correo", "Avanzado"):
             self.nav.addItem(QListWidgetItem(name))
         lay.addWidget(self.nav)
         self.pages = QStackedWidget()
         lay.addWidget(self.pages, 1)
         self.pages.addWidget(self._page_stations())
         self.pages.addWidget(self._page_telegram())
+        self.pages.addWidget(self._page_mail())
         self.pages.addWidget(self._page_advanced())
         self.nav.currentRowChanged.connect(self.pages.setCurrentIndex)
         self.nav.setCurrentRow(0)
@@ -1282,6 +1294,10 @@ class SettingsDialog(QDialog):
         logo_row.addWidget(self.logo_url, 1)
         logo_row.addWidget(pick)
         dv.addLayout(logo_row)
+        self.st_emails = QLineEdit()
+        self.st_emails.setPlaceholderText("Correos que reciben las alertas de esta estación (separados por comas)")
+        self.st_emails.editingFinished.connect(self.save_station_emails)
+        dv.addWidget(self.st_emails)
         lbl = QLabel("Streams")
         lbl.setObjectName("h2")
         dv.addWidget(lbl)
@@ -1357,6 +1373,7 @@ class SettingsDialog(QDialog):
         self.right.setCurrentIndex(0)
         self.st_title.setText(st["nombre"])
         self.logo_url.setText(st.get("logo", ""))
+        self.st_emails.setText(", ".join(st.get("correos", [])))
         self._refresh_logo_preview(st.get("logo", ""))
         while self.streams_box.count():
             it = self.streams_box.takeAt(0)
@@ -1383,6 +1400,13 @@ class SettingsDialog(QDialog):
             if logo and tries < 20:  # puede estar descargándose
                 QTimer.singleShot(500, lambda: self._refresh_logo_preview(logo, tries + 1))
         self.logo_prev.setPixmap(pm)
+
+    def save_station_emails(self):
+        st = self.current_station()
+        if st:
+            emails = [x for x in self.st_emails.text().replace(";", ",").replace(" ", ",").split(",") if x]
+            if emails != st.get("correos", []):
+                self.mon.set_station_emails(st["id"], emails)
 
     def set_logo_url(self):
         st = self.current_station()
@@ -1567,6 +1591,81 @@ class SettingsDialog(QDialog):
         err = self.mon.tg.send_now("✅ Prueba del Monitor Al Aire: las alertas llegarán aquí.")
         self._tg_message("Mensaje de prueba enviado." if not err else f"No se pudo enviar: {err}", not err)
 
+    # ---- Correo ----
+    def _page_mail(self):
+        page = QWidget()
+        page.setObjectName("page")
+        v = QVBoxLayout(page)
+        v.setContentsMargins(28, 24, 28, 24)
+        v.setSpacing(10)
+        h1 = QLabel("Alertas por correo")
+        h1.setObjectName("h1")
+        hint = QLabel("Se manda un correo cuando una estación sale del aire y cuando regresa.\n"
+                      "Los destinatarios se ponen en cada estación (pestaña Estaciones).\n"
+                      "Con Gmail usa una «contraseña de aplicación», no la contraseña normal.")
+        hint.setObjectName("muted")
+        v.addWidget(h1)
+        v.addWidget(hint)
+        c = self.mon.cfg["correo"]
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(14)
+        grid.setVerticalSpacing(4)
+        self.m_user = QLineEdit(c.get("usuario", ""))
+        self.m_user.setPlaceholderText("cuenta@gmail.com")
+        self.m_pass = QLineEdit(c.get("contrasena", ""))
+        self.m_pass.setEchoMode(QLineEdit.EchoMode.Password)
+        self.m_host = QLineEdit(c.get("servidor", "smtp.gmail.com"))
+        self.m_port = QLineEdit(str(c.get("puerto", 587)))
+        self.m_from = QLineEdit(c.get("remitente", "Monitor Al Aire"))
+        for i, (label, w) in enumerate((("Cuenta que envía", self.m_user), ("Contraseña de aplicación", self.m_pass),
+                                        ("Servidor SMTP", self.m_host), ("Puerto", self.m_port),
+                                        ("Nombre del remitente", self.m_from))):
+            r, col = divmod(i, 2)
+            grid.addWidget(self._lbl(label), r * 2, col)
+            grid.addWidget(w, r * 2 + 1, col)
+        v.addLayout(grid)
+        v.addSpacing(6)
+        row = QHBoxLayout()
+        save = QPushButton("Guardar")
+        save.clicked.connect(self.save_mail)
+        self.m_test_to = QLineEdit(c.get("usuario", ""))
+        self.m_test_to.setPlaceholderText("Enviar prueba a…")
+        test = QPushButton("Enviar prueba")
+        test.setObjectName("ghost")
+        test.clicked.connect(self.test_mail)
+        row.addWidget(save)
+        row.addSpacing(12)
+        row.addWidget(self.m_test_to, 1)
+        row.addWidget(test)
+        v.addLayout(row)
+        self.m_msg = QLabel("")
+        self.m_msg.setWordWrap(True)
+        v.addWidget(self.m_msg)
+        v.addStretch(1)
+        return page
+
+    def _mail_message(self, text, ok):
+        self.m_msg.setStyleSheet(f"color:{'#2EE59D' if ok else '#FF7A90'};font-size:13px;")
+        self.m_msg.setText(text)
+
+    def save_mail(self):
+        self.mon.set_correo({"usuario": self.m_user.text(), "contrasena": self.m_pass.text(),
+                             "servidor": self.m_host.text(), "puerto": self.m_port.text(),
+                             "remitente": self.m_from.text()})
+        self._mail_message("Guardado.", True)
+
+    def test_mail(self):
+        self.save_mail()
+        to = [x for x in self.m_test_to.text().replace(";", ",").replace(" ", ",").split(",") if x]
+        if not to:
+            self._mail_message("Escribe a qué correo mandar la prueba.", False)
+            return
+        self._mail_message("Enviando…", True)
+        QApplication.processEvents()
+        err = self.mon.mail.send_now("✅ Prueba del Monitor Al Aire",
+                                     "Este es un correo de prueba. Las alertas llegarán así.", to)
+        self._mail_message("Correo de prueba enviado." if not err else f"No se pudo enviar: {err}", not err)
+
     # ---- Avanzado ----
     def _page_advanced(self):
         page = QWidget()
@@ -1725,6 +1824,8 @@ def main():
     server = QLocalServer()
     server.listen(INSTANCE_KEY)
 
+    if "--autoprueba" in sys.argv:
+        os.environ["MONITOR_SIN_ALERTAS"] = "1"
     load_fonts()
     app.setFont(font(14))
     app.setStyleSheet(QSS)
@@ -1738,7 +1839,15 @@ def main():
     # Prueba automática (la usa la compilación en GitHub): guarda una captura y sale
     if "--autoprueba" in sys.argv:
         out = sys.argv[sys.argv.index("--autoprueba") + 1]
-        QTimer.singleShot(6000, lambda: (win.grab().save(out), mon.shutdown(), os._exit(0)))
+        def finish():
+            win.grab().save(out)
+            import json
+            with open(os.path.splitext(out)[0] + "_estado.json", "w", encoding="utf-8") as f:
+                json.dump(mon.status(), f, ensure_ascii=False, indent=2)
+            mon.shutdown()
+            os._exit(0)
+        espera = int(sys.argv[sys.argv.index("--autoprueba") + 2]) if len(sys.argv) > sys.argv.index("--autoprueba") + 2 else 6
+        QTimer.singleShot(espera * 1000, finish)
     return app.exec()
 
 
