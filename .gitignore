@@ -9227,3 +9227,18 @@ Nueva carpeta/monitor_radio.log
 Nueva carpeta/service_account.json
 monitor_radio.log
 rds_history.json
+
+# Monitor al aire (nuevo)
+config_monitor.json
+monitor_aire.log*
+build/
+dist/
+__pycache__/
+MonitorAlAire_Windows/python/
+MonitorAlAire_Windows/ffmpeg/
+MonitorAlAire_Windows/datos/
+MonitorAlAire_Windows/descargas_tmp/
+MonitorAlAire_Windows/app/build/
+MonitorAlAire_Windows/app/dist/
+MonitorAlAire_Windows/app/*.spec
+*.pyc

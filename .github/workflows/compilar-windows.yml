@@ -1,0 +1,85 @@
+name: Compilar Monitor Al Aire (Windows)
+
+on:
+  push:
+    paths:
+      - "MonitorAlAire_Windows/**"
+      - ".github/workflows/compilar-windows.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  portatil:
+    name: Probar versión portátil
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ejecutar instalador (descarga Python, paquetes y ffmpeg)
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File MonitorAlAire_Windows\app\instalar.ps1
+      - name: Abrir el programa y tomar captura
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath MonitorAlAire_Windows\python\python.exe `
+               -ArgumentList 'MonitorAlAire_Windows\app\monitor_app.py','--autoprueba',"$PWD\captura_portatil.png" `
+               -PassThru -Wait
+          if (-not (Test-Path captura_portatil.png)) { Get-Content MonitorAlAire_Windows\datos\monitor_aire.log -ErrorAction SilentlyContinue; exit 1 }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: captura-portatil
+          path: captura_portatil.png
+
+  exe:
+    name: Crear ejecutable
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Instalar dependencias
+        run: pip install -r MonitorAlAire_Windows/app/requirements.txt pyinstaller
+      - name: Descargar ffmpeg
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip -OutFile ff.zip
+          Expand-Archive ff.zip ff
+          Copy-Item (Get-ChildItem ff -Recurse -Filter ffmpeg.exe | Select-Object -First 1).FullName ffmpeg.exe
+      - name: Compilar con PyInstaller
+        shell: pwsh
+        run: |
+          cd MonitorAlAire_Windows/app
+          pyinstaller --noconfirm --windowed --name MonitorAlAire --icon icono.ico `
+            --add-data "fonts;fonts" --add-data "icono.ico;." `
+            --add-data "logos;logos" --add-data "estaciones_iniciales.json;." `
+            --exclude-module tkinter monitor_app.py
+          New-Item -ItemType Directory dist\MonitorAlAire\ffmpeg | Out-Null
+          Copy-Item ..\..\ffmpeg.exe dist\MonitorAlAire\ffmpeg\
+      - name: Probar el ejecutable
+        shell: pwsh
+        run: |
+          $exe = "MonitorAlAire_Windows\app\dist\MonitorAlAire\MonitorAlAire.exe"
+          Start-Process -FilePath $exe -ArgumentList '--autoprueba',"$PWD\captura_exe.png" -Wait
+          if (-not (Test-Path captura_exe.png)) { Get-Content MonitorAlAire_Windows\app\dist\MonitorAlAire\datos\monitor_aire.log -ErrorAction SilentlyContinue; exit 1 }
+          Remove-Item MonitorAlAire_Windows\app\dist\MonitorAlAire\datos -Recurse -Force -ErrorAction SilentlyContinue
+      - name: Empaquetar
+        shell: pwsh
+        run: Compress-Archive MonitorAlAire_Windows\app\dist\MonitorAlAire MonitorAlAire_Windows_exe.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MonitorAlAire-exe
+          path: |
+            MonitorAlAire_Windows_exe.zip
+            captura_exe.png
+      - name: Publicar en Releases
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=monitor-al-aire
+          gh release view $TAG >/dev/null 2>&1 || gh release create $TAG --target "$GITHUB_SHA" \
+            --title "Monitor Al Aire para Windows" \
+            --notes "Descarga MonitorAlAire_Windows_exe.zip, descomprímelo y abre MonitorAlAire.exe. Ya incluye ffmpeg."
+          gh release upload $TAG MonitorAlAire_Windows_exe.zip --clobber

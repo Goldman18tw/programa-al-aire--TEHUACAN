@@ -1,0 +1,19 @@
+MONITOR AL AIRE - version portatil para Windows
+================================================
+
+1. Copia esta carpeta completa a la PC (por ejemplo a C:\MonitorAlAire).
+2. Haz doble clic en "Iniciar Monitor.bat".
+   La primera vez descarga Python, sus paquetes y ffmpeg (necesita internet,
+   tarda unos minutos). Las siguientes veces solo revisa y abre.
+3. Se crea un acceso directo "Monitor Al Aire" en el Escritorio.
+
+Uso:
+- Engrane (arriba a la derecha) > Estaciones: crea cada estacion y
+  despues agregale sus streams (pega la URL).
+- Telegram: pega el token de tu bot, escribele un mensaje al bot y
+  presiona "Detectar chats".
+- Avanzado: tiempos de alerta y "Abrir al iniciar Windows".
+- Si cierras la ventana el monitor sigue vigilando; lo encuentras junto
+  al reloj de Windows. Para cerrarlo: clic derecho en ese icono > Salir.
+
+Tu configuracion y el registro se guardan en la carpeta "datos".
