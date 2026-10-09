@@ -53,6 +53,7 @@ STATE_COLOR = {
     "fuera": QColor("#FF4D6A"),
     "conectando": QColor("#7A86A8"),
     "sin_streams": QColor("#7A86A8"),
+    "sin_conexion": QColor("#9AA4C0"),
 }
 STATE_LABEL = {
     "aire": "AL AIRE",
@@ -61,6 +62,7 @@ STATE_LABEL = {
     "fuera": "FUERA DEL AIRE",
     "conectando": "CONECTANDO",
     "sin_streams": "SIN STREAMS",
+    "sin_conexion": "SIN CONEXIÓN",
 }
 STREAM_COLOR = {
     "audio": QColor("#2EE59D"),
@@ -372,7 +374,7 @@ def draw_logo_emblem(p: QPainter, cx: float, cy: float, R: float, state: str, t:
                      logo: str) -> bool:
     """Emblema con el logo de la estación. Devuelve False si el logo aún no está listo."""
     dpr = p.device().devicePixelRatioF() if p.device() else 1.0
-    gray = state in ("fuera", "conectando", "sin_streams")
+    gray = state in ("fuera", "conectando", "sin_streams", "sin_conexion")
     inner = R * 0.86
     pm = LOGOS.round_pixmap(logo, inner * 2, gray, dpr)
     if pm is None:
@@ -424,7 +426,7 @@ def draw_logo_emblem(p: QPainter, cx: float, cy: float, R: float, state: str, t:
     p.drawEllipse(QPointF(cx, cy), inner, inner)
 
     # Insignia de estado (abajo a la derecha)
-    if state in ("fuera", "parcial", "verificando", "aire"):
+    if state in ("fuera", "parcial", "verificando", "aire", "sin_conexion"):
         bx, by = cx + R * 0.71, cy + R * 0.71
         br = R * 0.27
         p.setPen(QPen(QColor("#0E1428"), max(1.5, R * 0.05)))
@@ -520,6 +522,8 @@ class StationCard(QWidget):
             sub = f"{bad} stream con falla" if bad == 1 else f"{bad} streams con falla"
         elif state == "sin_streams":
             sub = "Agrégale streams en Configuración"
+        elif state == "sin_conexion":
+            sub = "El monitor no logra conectarse"
 
         # Tarjeta ancha: logo a la izquierda y datos a la derecha
         if w > h * 1.3 and h >= 140:

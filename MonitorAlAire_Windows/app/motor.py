@@ -428,6 +428,20 @@ def rms_db(chunk: bytes) -> float:
 
 _ERRORS = [
     ("connection refused", "conexión rechazada (el servidor no acepta conexiones en ese puerto)"),
+    ("10054", "la conexión fue cortada (firewall, antivirus o filtro de la red)"),
+    ("forzado la interrupci", "la conexión fue cortada (firewall, antivirus o filtro de la red)"),
+    ("forcibly closed", "la conexión fue cortada (firewall, antivirus o filtro de la red)"),
+    ("remote end closed", "el servidor cerró la conexión sin responder"),
+    ("ssl", "falló la conexión segura (HTTPS); posible filtro o antivirus"),
+    ("tls", "falló la conexión segura (HTTPS); posible filtro o antivirus"),
+    ("schannel", "falló la conexión segura (HTTPS); posible filtro o antivirus"),
+    ("407", "la red pide usuario de proxy (HTTP 407)"),
+    ("proxy", "problema con el proxy de la red"),
+    ("503", "el servidor no está disponible (HTTP 503)"),
+    ("429", "demasiadas conexiones (HTTP 429)"),
+    ("rechaz", "conexión rechazada (el servidor no acepta conexiones en ese puerto)"),
+    ("tiempo de espera", "tiempo de espera agotado (el servidor no responde)"),
+    ("getaddrinfo", "no se encontró el servidor (revisa la URL o el DNS)"),
     ("couldn't connect", "no se pudo conectar al servidor (apagado o bloqueado)"),
     ("could not resolve", "no se encontró el servidor (revisa la URL o el DNS)"),
     ("actively refused", "conexión rechazada (el servidor no acepta conexiones en ese puerto)"),
@@ -465,11 +479,14 @@ def short_error(err: str) -> str:
     e = (err or "").lower()
     for key, text in (("403", "Bloqueado (403)"), ("rechazada", "Rechazado"), ("tiempo de espera", "Sin respuesta"),
                       ("no se encontró el servidor", "Error de DNS"), ("certificado", "Certificado"),
-                      ("404", "No existe (404)"), ("cerró", "Cortado"), ("cortó", "Cortado"),
-                      ("no envía audio", "Sin audio válido"), ("firewall", "Sin respuesta")):
+                      ("404", "No existe (404)"), ("cerró", "Cortado"), ("cortó", "Cortado"), ("cortada", "Cortado"),
+                      ("no envía audio", "Sin audio válido"), ("firewall", "Cortado"),
+                      ("https", "Error HTTPS"), ("proxy", "Proxy"), ("503", "No disponible"),
+                      ("sin respuesta", "Sin respuesta")):
         if key in e:
             return text
-    return "Sin conexión"
+    raw = (err or "").split("[")[0].strip()
+    return (raw[:22] + "…") if len(raw) > 23 else (raw or "Sin conexión")
 
 
 class StreamMonitor:
@@ -722,7 +739,7 @@ class StreamMonitor:
     def state(self, t: float) -> str:
         last_data, last_sound, _, _, connected = self.snapshot()
         if not self.ever_data:
-            return "conectando" if t - last_sound < 20 else "sin_conexion"
+            return "sin_conexion" if (self.last_error or t - last_sound >= 20) else "conectando"
         if not connected or t - last_data > 5:
             return "sin_conexion"
         return "audio" if t - last_sound < 5 else "silencio"
@@ -766,6 +783,7 @@ class Station:
         self.off_since_wall = ""
         self.off_since_epoch = 0.0
         self.last_reminder = 0.0
+        self.unreachable_warned = False
 
     def apply(self, cfg: dict, general: dict, ffmpeg: str | None):
         """Aplica la configuración conservando los streams que no cambiaron."""
@@ -814,6 +832,20 @@ class Station:
         snaps = [s.snapshot() for s in self.streams]
         # Tiempo desde que CUALQUIER stream tuvo audio
         silent_all = min(t - sn[1] for sn in snaps)
+
+        # Si nunca se ha logrado conectar a ningún stream de esta estación desde que
+        # abrió el programa, no se puede decir que "salió del aire": es un problema de
+        # conexión del monitor. Se avisa una sola vez por Telegram (sin correo).
+        if not any(s.ever_data for s in self.streams):
+            if silent_all >= self.alert_after and not self.unreachable_warned:
+                self.unreachable_warned = True
+                tg.send(f"⚠️ <b>No logro conectarme a {html.escape(self.name)}</b> desde esta PC, "
+                        f"así que no la estoy vigilando. Esto no significa que esté fuera del aire.\n\n"
+                        + self.details(t))
+            return
+        if self.unreachable_warned:
+            self.unreachable_warned = False
+            tg.send(f"👍 Ya me conecté a <b>{html.escape(self.name)}</b>; la estoy vigilando.")
 
         if not self.off_air:
             if silent_all >= self.alert_after:
@@ -880,6 +912,9 @@ class Station:
             estado = "sin_streams"
         elif self.off_air:
             estado = "fuera"
+        elif not any(s.ever_data for s in self.streams) and \
+                any(x["estado"] == "sin_conexion" for x in streams):
+            estado = "sin_conexion"
         elif all(e == "conectando" for e in states):
             estado = "conectando"
         elif "audio" not in states:
