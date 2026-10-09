@@ -1,0 +1,36 @@
+{
+  "telegram": {
+    "token": "PEGA_AQUI_EL_TOKEN_DE_TU_BOT",
+    "chat_ids": ["PEGA_AQUI_TU_CHAT_ID"]
+  },
+  "general": {
+    "umbral_db": -50,
+    "alerta_tras_segundos": 90,
+    "recuperacion_segundos": 15,
+    "aviso_stream_tras_segundos": 300,
+    "recordatorio_minutos": 30
+  },
+  "estaciones": [
+    {
+      "nombre": "XHBUAP Puebla",
+      "streams": [
+        { "nombre": "Principal", "url": "http://148.228.50.32:8000" },
+        { "nombre": "Respaldo",  "url": "http://URL_DEL_SEGUNDO_STREAM" }
+      ]
+    },
+    {
+      "nombre": "XHTEE Tehuacán",
+      "streams": [
+        { "nombre": "Principal", "url": "http://187.141.99.161:8000" },
+        { "nombre": "Respaldo",  "url": "http://URL_DEL_SEGUNDO_STREAM" }
+      ]
+    },
+    {
+      "nombre": "XHCHP Chignahuapan",
+      "streams": [
+        { "nombre": "Principal", "url": "http://148.228.50.33:8000" },
+        { "nombre": "Respaldo",  "url": "http://URL_DEL_SEGUNDO_STREAM" }
+      ]
+    }
+  ]
+}

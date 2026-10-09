@@ -9227,3 +9227,10 @@ Nueva carpeta/monitor_radio.log
 Nueva carpeta/service_account.json
 monitor_radio.log
 rds_history.json
+
+# Monitor al aire (nuevo)
+config_monitor.json
+monitor_aire.log*
+build/
+dist/
+__pycache__/
