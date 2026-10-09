@@ -423,6 +423,10 @@ def rms_db(chunk: bytes) -> float:
 
 _ERRORS = [
     ("connection refused", "conexión rechazada (el servidor no acepta conexiones en ese puerto)"),
+    ("actively refused", "conexión rechazada (el servidor no acepta conexiones en ese puerto)"),
+    ("10061", "conexión rechazada (el servidor no acepta conexiones en ese puerto)"),
+    ("error number -138", "no se pudo conectar (servidor apagado o bloqueado por firewall)"),
+    ("10060", "tiempo de espera agotado (el servidor no responde)"),
     ("timed out", "tiempo de espera agotado (el servidor no responde)"),
     ("timeout", "tiempo de espera agotado (el servidor no responde)"),
     ("name or service not known", "no se encontró el servidor (revisa la URL o el DNS)"),
