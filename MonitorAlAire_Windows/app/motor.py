@@ -22,7 +22,10 @@ import math
 import operator
 import os
 import queue
+import re
 import shutil
+import smtplib
+import ssl
 import socket
 import subprocess
 import sys
@@ -32,6 +35,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from email.message import EmailMessage
+from email.utils import formataddr
 from logging.handlers import RotatingFileHandler
 
 # ---------------------------------------------------------------------------
@@ -61,6 +66,8 @@ DEFAULTS = {
     "recordatorio_minutos": 30,     # recordatorio mientras siga fuera (0 = no)
 }
 
+USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+              "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 SAMPLE_RATE = 8000          # suficiente para medir nivel y muy ligero
 WINDOW_BYTES = SAMPLE_RATE * 2 // 2  # medio segundo de audio s16le mono
 NO_DATA_RESTART_SECS = 20   # si FFmpeg no entrega datos en este tiempo, se reinicia
@@ -106,10 +113,20 @@ def load_config() -> dict:
     tg = cfg.setdefault("telegram", {})
     tg.setdefault("token", "")
     tg.setdefault("chat_ids", [])
+    mail = cfg.setdefault("correo", {})
+    for k, v in (("servidor", "smtp.gmail.com"), ("puerto", 587), ("usuario", ""),
+                 ("contrasena", ""), ("remitente", "Monitor Al Aire")):
+        mail.setdefault(k, v)
     cfg.setdefault("estaciones", [])
+    if path == CONFIG_FILE and migrate_config(cfg):
+        try:
+            save_config(cfg)
+        except Exception as e:
+            log.error(f"No pude guardar la configuración actualizada: {e}")
     for st in cfg["estaciones"]:
         st.setdefault("id", new_id())
         st.setdefault("logo", "")
+        st.setdefault("correos", [])
         st.setdefault("streams", [])
         for i, s in enumerate(st["streams"]):
             if isinstance(s, str):
@@ -117,6 +134,46 @@ def load_config() -> dict:
             s.setdefault("id", new_id())
             s.setdefault("nombre", f"Stream {i + 1}")
     return cfg
+
+
+def _norm(name: str) -> str:
+    import unicodedata
+    n = unicodedata.normalize("NFKD", name or "").encode("ascii", "ignore").decode().lower()
+    return re.sub(r"[^a-z]", "", n)
+
+
+def migrate_config(cfg: dict) -> bool:
+    """Completa una configuración vieja con lo que trae el programa (Telegram,
+    correo, correos por estación, streams nuevos) sin borrar nada del usuario."""
+    if int(cfg.get("version", 1)) >= 2 or not os.path.exists(INITIAL_FILE):
+        return False
+    try:
+        with open(INITIAL_FILE, "r", encoding="utf-8") as f:
+            ini = json.load(f)
+    except Exception:
+        return False
+    tg, itg = cfg["telegram"], ini.get("telegram", {})
+    if not tg.get("token"):
+        tg["token"] = itg.get("token", "")
+    if not tg.get("chat_ids"):
+        tg["chat_ids"] = list(itg.get("chat_ids", []))
+    mail, imail = cfg["correo"], ini.get("correo", {})
+    if not mail.get("usuario"):
+        mail.update(imail)
+    by_name = {_norm(s.get("nombre", "")): s for s in cfg["estaciones"]}
+    for ist in ini.get("estaciones", []):
+        st = by_name.get(_norm(ist["nombre"]))
+        if not st:
+            continue
+        if not st.get("correos"):
+            st["correos"] = list(ist.get("correos", []))
+        urls = {x.get("url") for x in st.get("streams", [])}
+        for x in ist.get("streams", []):
+            if x["url"] not in urls:
+                st.setdefault("streams", []).append({"id": new_id(), **x})
+    cfg["version"] = 2
+    log.info("Configuración actualizada con Telegram, correo y streams nuevos")
+    return True
 
 
 def save_config(cfg: dict):
@@ -272,6 +329,82 @@ class Telegram:
                 time.sleep(10)
 
 
+class Mailer:
+    """Envía correos en un hilo aparte, con reintentos si falla la red."""
+
+    def __init__(self):
+        self.cfg: dict = {}
+        self.q: queue.Queue = queue.Queue()
+        threading.Thread(target=self._sender, daemon=True).start()
+
+    def configure(self, cfg: dict):
+        self.cfg = dict(cfg)
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.cfg.get("usuario") and self.cfg.get("contrasena"))
+
+    def send(self, subject: str, body: str, to: list):
+        to = [t.strip() for t in to if t and t.strip()]
+        if not to or not self.enabled:
+            return
+        log.info(f"CORREO a {len(to)} destinatarios: {subject}")
+        self.q.put((subject, body, to, time.time()))
+
+    def _deliver(self, subject: str, body: str, to: list):
+        c = self.cfg
+        msg = EmailMessage()
+        msg["Subject"] = subject
+        msg["From"] = formataddr((c.get("remitente") or "Monitor Al Aire", c["usuario"]))
+        msg["To"] = ", ".join(to)
+        msg.set_content(body)
+        host, port = c.get("servidor") or "smtp.gmail.com", int(c.get("puerto") or 587)
+        ctx = ssl.create_default_context()
+        if port == 465:
+            with smtplib.SMTP_SSL(host, port, timeout=30, context=ctx) as smtp:
+                smtp.login(c["usuario"], c["contrasena"])
+                smtp.send_message(msg)
+        else:
+            with smtplib.SMTP(host, port, timeout=30) as smtp:
+                smtp.starttls(context=ctx)
+                smtp.login(c["usuario"], c["contrasena"])
+                smtp.send_message(msg)
+
+    def send_now(self, subject: str, body: str, to: list) -> str | None:
+        if not self.enabled:
+            return "Falta el usuario o la contraseña"
+        try:
+            self._deliver(subject, body, to)
+            return None
+        except smtplib.SMTPAuthenticationError:
+            return "Usuario o contraseña incorrectos (en Gmail usa una contraseña de aplicación)"
+        except Exception as e:
+            return str(e)
+
+    def _sender(self):
+        while True:
+            subject, body, to, created = self.q.get()
+            delay = 5
+            while True:
+                try:
+                    self._deliver(subject, body, to)
+                    break
+                except smtplib.SMTPAuthenticationError as e:
+                    log.error(f"Correo: usuario o contraseña incorrectos ({e})")
+                    break
+                except Exception as e:
+                    if time.time() - created > 3600:
+                        log.error(f"Correo: se descarta mensaje viejo ({e})")
+                        break
+                    log.warning(f"Correo: error enviando ({e}); reintento en {delay}s")
+                    time.sleep(delay)
+                    delay = min(delay * 2, 120)
+
+
+def html_to_text(text: str) -> str:
+    return html.unescape(re.sub(r"<[^>]+>", "", text))
+
+
 # ---------------------------------------------------------------------------
 # Monitoreo de un stream
 # ---------------------------------------------------------------------------
@@ -286,6 +419,34 @@ def rms_db(chunk: bytes) -> float:
     ms = sum(map(operator.mul, a, a)) / len(a)
     rms = math.sqrt(ms) / 32768.0
     return 20.0 * math.log10(max(rms, 1e-5))
+
+
+_ERRORS = [
+    ("connection refused", "conexión rechazada (el servidor no acepta conexiones en ese puerto)"),
+    ("timed out", "tiempo de espera agotado (el servidor no responde)"),
+    ("timeout", "tiempo de espera agotado (el servidor no responde)"),
+    ("name or service not known", "no se encontró el servidor (revisa la URL o el DNS)"),
+    ("getaddrinfo failed", "no se encontró el servidor (revisa la URL o el DNS)"),
+    ("failed to resolve", "no se encontró el servidor (revisa la URL o el DNS)"),
+    ("certificate", "problema con el certificado de seguridad (HTTPS)"),
+    ("403", "el servidor negó el acceso (HTTP 403)"),
+    ("404", "la dirección no existe en el servidor (HTTP 404)"),
+    ("invalid data", "el servidor no envía audio válido"),
+    ("network is unreachable", "sin ruta de red hacia el servidor"),
+    ("connection reset", "el servidor cortó la conexión"),
+]
+
+
+def explain_error(raw: str) -> str:
+    """Traduce los errores comunes de ffmpeg/red a algo entendible."""
+    for prefix in ("Error opening input files: ", "Error opening input: "):
+        if raw.startswith(prefix):
+            raw = raw[len(prefix):]
+    low = raw.lower()
+    for key, text in _ERRORS:
+        if key in low:
+            return f"{text} [{raw.strip()[:90]}]"
+    return raw.strip()
 
 
 class StreamMonitor:
@@ -304,6 +465,8 @@ class StreamMonitor:
         self.level_db = -100.0
         self.connected = False
         self.ever_data = False
+        self.last_error = ""
+        self._logged: dict[str, str] = {}
         self.proc: subprocess.Popen | None = None
         self.stopped = False
         self.bad_alerted = False
@@ -333,32 +496,47 @@ class StreamMonitor:
         self.stopped = True
         self._kill()
 
-    def _cmd(self, ffmpeg: str):
-        return [ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error",
-                "-user_agent", "Mozilla/5.0 (MonitorAlAire)",
-                "-rw_timeout", "15000000",
-                "-i", self.url,
-                "-vn", "-ac", "1", "-ar", str(SAMPLE_RATE),
-                "-f", "s16le", "pipe:1"]
+    def _cmd(self, ffmpeg: str, source: str):
+        cmd = [ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error"]
+        if source == "directo":
+            cmd += ["-user_agent", USER_AGENT, "-rw_timeout", "15000000", "-i", self.url]
+        else:
+            cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-i", "pipe:0"]
+        return cmd + ["-vn", "-ac", "1", "-ar", str(SAMPLE_RATE), "-f", "s16le", "pipe:1"]
 
     def _run(self, ffmpeg: str):
+        """Conecta al stream. Hay dos formas y se alternan si una falla:
+        - "directo": ffmpeg abre la URL.
+        - "sistema": Python abre la URL con la conexión de Windows (usa el proxy
+          y los certificados del sistema, como el navegador) y le pasa el audio a ffmpeg."""
         backoff = 2
         flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        source = "directo"
+        fails_in_source = 0
         while not self.stopped:
             got_data = False
+            err_lines: list[str] = []
+            feed_err: list[str] = []
             try:
                 self.proc = subprocess.Popen(
-                    self._cmd(ffmpeg), stdin=subprocess.DEVNULL,
-                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                    self._cmd(ffmpeg, source),
+                    stdin=subprocess.DEVNULL if source == "directo" else subprocess.PIPE,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                     creationflags=flags, bufsize=0)
+                proc = self.proc
+                threading.Thread(target=self._read_stderr, args=(proc, err_lines), daemon=True).start()
+                if source == "sistema":
+                    threading.Thread(target=self._feed, args=(proc, feed_err), daemon=True).start()
                 buf = b""
                 while not self.stopped:
-                    chunk = self.proc.stdout.read(4000)
+                    chunk = proc.stdout.read(4000)
                     if not chunk:
                         break
                     if not got_data:
                         got_data = True
-                        log.info(f"[{self.name}] conectado")
+                        self.last_error = ""
+                        self._logged = {}
+                        log.info(f"[{self.name}] conectado ({source})")
                     with self.lock:
                         self.last_data = time.monotonic()
                         self.connected = True
@@ -368,7 +546,7 @@ class StreamMonitor:
                         win, buf = buf[:WINDOW_BYTES], buf[WINDOW_BYTES:]
                         self._process_window(win)
             except Exception as e:
-                log.warning(f"[{self.name}] error en ffmpeg: {e}")
+                err_lines.append(f"error al iniciar ffmpeg: {e}")
             finally:
                 self._kill()
                 with self.lock:
@@ -377,9 +555,58 @@ class StreamMonitor:
                 break
             if got_data:
                 backoff = 2
+                fails_in_source = 0
                 log.info(f"[{self.name}] conexión terminada; reconectando")
+            else:
+                time.sleep(0.3)  # dejar que se lea el último mensaje de error
+                raw = (feed_err or err_lines or ["sin respuesta del servidor"])[-1]
+                err = explain_error(raw)[:200]
+                if self._logged.get(source) != err:
+                    self._logged[source] = err
+                    log.warning(f"[{self.name}] no conecta ({source}): {err}")
+                self.last_error = err
+                fails_in_source += 1
+                if fails_in_source >= 2:
+                    source = "sistema" if source == "directo" else "directo"
+                    fails_in_source = 0
+                    backoff = 2
+                    continue
             time.sleep(backoff)
             backoff = min(backoff * 2, MAX_BACKOFF)
+
+    @staticmethod
+    def _read_stderr(proc: subprocess.Popen, out: list):
+        try:
+            for raw in iter(proc.stderr.readline, b""):
+                line = raw.decode("utf-8", "ignore").strip()
+                if line:
+                    out.append(line)
+                    del out[:-5]
+        except Exception:
+            pass
+
+    def _feed(self, proc: subprocess.Popen, err: list):
+        """Descarga el stream con la conexión de Windows y se lo pasa a ffmpeg."""
+        try:
+            req = urllib.request.Request(self.url, headers={"User-Agent": USER_AGENT,
+                                                            "Accept": "*/*", "Icy-MetaData": "0"})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                while not self.stopped and proc.poll() is None:
+                    data = r.read(8192)
+                    if not data:
+                        err.append("el servidor cerró la conexión")
+                        break
+                    proc.stdin.write(data)
+        except urllib.error.HTTPError as e:
+            err.append(f"el servidor respondió HTTP {e.code} {e.reason}")
+        except Exception as e:
+            if proc.poll() is None:
+                err.append(f"{type(e).__name__}: {e}")
+        finally:
+            try:
+                proc.stdin.close()
+            except Exception:
+                pass
 
     def _process_window(self, win: bytes):
         db = rms_db(win)
@@ -428,12 +655,14 @@ class StreamMonitor:
             return f"🟠 {lbl}: silencio ({human(silent_for)})"
         if st == "conectando":
             return f"⚪ {lbl}: conectando"
-        return f"🔴 {lbl}: sin conexión ({human(silent_for)})"
+        why = f" — {html.escape(self.last_error[:120])}" if self.last_error else ""
+        return f"🔴 {lbl}: sin conexión ({human(silent_for)}){why}"
 
     def to_json(self, t: float) -> dict:
         _, last_sound, _, level, _ = self.snapshot()
         st = self.state(t)
         return {"id": self.id, "nombre": self.label, "url": self.url, "estado": st,
+                "error": self.last_error if st in ("sin_conexion", "conectando") else "",
                 "nivel": round(level, 1) if st == "audio" else -100,
                 "sin_audio_seg": int(max(0, t - last_sound))}
 
@@ -458,6 +687,7 @@ class Station:
         """Aplica la configuración conservando los streams que no cambiaron."""
         self.name = cfg["nombre"]
         self.logo = cfg.get("logo", "")
+        self.emails = list(cfg.get("correos", []))
         g = dict(general)
         g.update({k: v for k, v in cfg.items() if k in DEFAULTS})
         self.alert_after = float(g["alerta_tras_segundos"])
@@ -494,7 +724,7 @@ class Station:
         for s in self.streams:
             s.stop()
 
-    def evaluate(self, t: float, tg: Telegram):
+    def evaluate(self, t: float, tg: Telegram, mail: "Mailer | None" = None):
         if not self.streams:
             return
         snaps = [s.snapshot() for s in self.streams]
@@ -508,9 +738,13 @@ class Station:
                 self.off_since_epoch = time.time() - silent_all
                 self.off_since_wall = time.strftime("%H:%M:%S", time.localtime(self.off_since_epoch))
                 self.last_reminder = t
-                tg.send(f"🚨 <b>{html.escape(self.name)} FUERA DEL AIRE</b>\n"
-                        f"Sin audio en ningún stream desde las {self.off_since_wall} "
-                        f"({human(silent_all)}).\n\n" + self.details(t))
+                msg = (f"🚨 <b>{html.escape(self.name)} FUERA DEL AIRE</b>\n"
+                       f"Sin audio en ningún stream desde las {self.off_since_wall} "
+                       f"({human(silent_all)}).\n\n" + self.details(t))
+                tg.send(msg)
+                if mail:
+                    mail.send(f"🚨 {self.name} - FUERA DEL AIRE",
+                              html_to_text(msg) + f"\n\nAlerta enviada: {now_str()}", self.emails)
         else:
             # ¿Algún stream tiene audio continuo suficiente?
             recovered = any(t - sn[1] < 5 and t - sn[2] >= self.recover_after for sn in snaps)
@@ -520,9 +754,13 @@ class Station:
                 # Los streams que sigan mal ya aparecen en este mensaje: no repetir aviso
                 for s, sn in zip(self.streams, snaps):
                     s.bad_alerted = t - sn[1] >= 5
-                tg.send(f"✅ <b>{html.escape(self.name)} DE VUELTA AL AIRE</b>\n"
-                        f"Estuvo fuera {human(dur)} (desde las {self.off_since_wall}).\n\n"
-                        + self.details(t))
+                msg = (f"✅ <b>{html.escape(self.name)} DE VUELTA AL AIRE</b>\n"
+                       f"Estuvo fuera {human(dur)} (desde las {self.off_since_wall}).\n\n"
+                       + self.details(t))
+                tg.send(msg)
+                if mail:
+                    mail.send(f"✅ {self.name} - De vuelta al aire",
+                              html_to_text(msg) + f"\n\nRecuperación: {now_str()}", self.emails)
             elif self.reminder and t - self.last_reminder >= self.reminder:
                 self.last_reminder = t
                 tg.send(f"⏰ <b>{html.escape(self.name)}</b> sigue fuera del aire "
@@ -616,6 +854,7 @@ class Monitor:
             log.error("No se encontró ffmpeg; no se puede medir el audio.")
         self.tg = Telegram()
         self.tg.command_handler = self.handle_command
+        self.mail = Mailer()
         self.net = NetChecker()
         self.stations: dict[str, Station] = {}
         self.net_down_since = None
@@ -625,7 +864,13 @@ class Monitor:
     def apply(self):
         with self.lock:
             t = self.cfg["telegram"]
-            self.tg.configure(t.get("token", ""), t.get("chat_ids", []))
+            if os.getenv("MONITOR_SIN_ALERTAS"):
+                # Modo prueba: no enviar nada a Telegram ni por correo
+                self.tg.configure("", [])
+                self.mail.configure({})
+            else:
+                self.tg.configure(t.get("token", ""), t.get("chat_ids", []))
+                self.mail.configure(self.cfg.get("correo", {}))
             seen = set()
             for sc in self.cfg["estaciones"]:
                 st = self.stations.get(sc["id"]) or Station(sc["id"])
@@ -713,6 +958,26 @@ class Monitor:
                 tg["chat_ids"] = [str(c).strip() for c in chat_ids if str(c).strip()]
             self.save()
 
+    def set_correo(self, values: dict):
+        with self.lock:
+            c = self.cfg["correo"]
+            for k in ("servidor", "usuario", "contrasena", "remitente"):
+                if k in values:
+                    c[k] = str(values[k]).strip()
+            if "puerto" in values:
+                try:
+                    c["puerto"] = int(values["puerto"])
+                except (TypeError, ValueError):
+                    pass
+            self.save()
+
+    def set_station_emails(self, sid: str, emails: list):
+        with self.lock:
+            st = self.find_station_cfg(sid)
+            if st is not None:
+                st["correos"] = [e.strip() for e in emails if e.strip()]
+                self.save()
+
     def set_general(self, values: dict):
         with self.lock:
             for k in DEFAULTS:
@@ -735,6 +1000,7 @@ class Monitor:
             sts = [st.to_json(t) for st in self.stations.values()]
         return {"hora": time.strftime("%H:%M:%S"), "internet": self.net.ok,
                 "ffmpeg": bool(self.ffmpeg), "telegram": self.tg.enabled,
+                "correo": self.mail.enabled,
                 "estaciones": sts}
 
     def handle_command(self, cmd: str) -> str | None:
@@ -786,6 +1052,6 @@ class Monitor:
 
             for st in stations:
                 try:
-                    st.evaluate(t, self.tg)
+                    st.evaluate(t, self.tg, self.mail)
                 except Exception as e:
                     log.exception(f"[{st.name}] error evaluando: {e}")

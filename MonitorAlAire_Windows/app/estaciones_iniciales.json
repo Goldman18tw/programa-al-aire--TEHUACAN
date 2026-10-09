@@ -1,34 +1,98 @@
 {
+  "version": 2,
+  "telegram": {
+    "token": "8784430014:AAEa3z28QPDMSyUqkcHVJMbo2NJ9bmEQufk",
+    "chat_ids": [
+      "-5114850734"
+    ]
+  },
+  "correo": {
+    "servidor": "smtp.gmail.com",
+    "puerto": 587,
+    "usuario": "rboffairdetector@gmail.com",
+    "contrasena": "saysuxlgdpcjwmgv",
+    "remitente": "Monitor Al Aire"
+  },
   "estaciones": [
     {
       "nombre": "Puebla",
       "logo": "logos/puebla.png",
       "streams": [
-        {"nombre": "Principal", "url": "https://puebla.radiobuap.com.mx/stream"},
-        {"nombre": "Respaldo", "url": "http://148.228.50.35:8000"}
+        {
+          "nombre": "Principal",
+          "url": "https://puebla.radiobuap.com.mx/stream"
+        },
+        {
+          "nombre": "Respaldo",
+          "url": "http://148.228.50.35:8000"
+        }
+      ],
+      "correos": [
+        "rauloa13@gmail.com",
+        "americo.vazquez@correo.buap.mx",
+        "sergio.solano@correo.buap.mx",
+        "marisoolval98@gmail.com",
+        "jesus.aguilarm@correo.buap.mx"
       ]
     },
     {
       "nombre": "Lobo Radio",
       "logo": "logos/lobo.png",
       "streams": [
-        {"nombre": "Principal", "url": "https://loboradio.radiobuap.com.mx/stream"}
+        {
+          "nombre": "Principal",
+          "url": "https://loboradio.radiobuap.com.mx/stream"
+        },
+        {
+          "nombre": "Respaldo",
+          "url": "http://78.129.252.13:17090/;stream.mp3"
+        }
+      ],
+      "correos": [
+        "rauloa13@gmail.com",
+        "o127709@hotmail.com"
       ]
     },
     {
       "nombre": "Tehuacán",
       "logo": "logos/tehuacan.png",
       "streams": [
-        {"nombre": "Principal", "url": "https://tehuacan.radiobuap.com.mx/stream"},
-        {"nombre": "Respaldo", "url": "http://187.141.99.161:8000"}
+        {
+          "nombre": "Principal",
+          "url": "https://tehuacan.radiobuap.com.mx/stream"
+        },
+        {
+          "nombre": "Respaldo",
+          "url": "http://187.141.99.161:8000"
+        }
+      ],
+      "correos": [
+        "rauloa13@gmail.com",
+        "americo.vazquez@correo.buap.mx",
+        "sergio.solano@correo.buap.mx",
+        "marisoolval98@gmail.com",
+        "jesus.aguilarm@correo.buap.mx"
       ]
     },
     {
       "nombre": "Chignahuapan",
       "logo": "logos/chignahuapan.png",
       "streams": [
-        {"nombre": "Principal", "url": "https://chignahuapan.radiobuap.com.mx/stream"},
-        {"nombre": "Respaldo", "url": "http://148.228.50.33:8000"}
+        {
+          "nombre": "Principal",
+          "url": "https://chignahuapan.radiobuap.com.mx/stream"
+        },
+        {
+          "nombre": "Respaldo",
+          "url": "http://148.228.50.33:8000"
+        }
+      ],
+      "correos": [
+        "rauloa13@gmail.com",
+        "americo.vazquez@correo.buap.mx",
+        "sergio.solano@correo.buap.mx",
+        "marisoolval98@gmail.com",
+        "jesus.aguilarm@correo.buap.mx"
       ]
     }
   ]
