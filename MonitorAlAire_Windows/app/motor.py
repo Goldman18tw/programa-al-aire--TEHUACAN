@@ -511,7 +511,9 @@ class StreamMonitor:
           y los certificados del sistema, como el navegador) y le pasa el audio a ffmpeg."""
         backoff = 2
         flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-        source = "directo"
+        # HTTPS (Cloudflare) rechaza a ffmpeg en Windows con 403, pero acepta la
+        # conexión de Windows; HTTP simple (Shoutcast/Icecast por IP) va mejor directo.
+        source = "sistema" if self.url.lower().startswith("https://") else "directo"
         fails_in_source = 0
         while not self.stopped:
             got_data = False
@@ -800,7 +802,7 @@ class Station:
             estado = "conectando"
         elif "audio" not in states:
             estado = "verificando"  # sin audio, aún no se confirma la caída
-        elif any(e != "audio" and s["sin_audio_seg"] >= UI_BAD_SECS
+        elif any(e not in ("audio", "conectando") and s["sin_audio_seg"] >= UI_BAD_SECS
                  for e, s in zip(states, streams)):
             estado = "parcial"
         else:
