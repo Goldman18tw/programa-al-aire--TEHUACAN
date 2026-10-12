@@ -153,7 +153,17 @@ def _norm(name: str) -> str:
 def migrate_config(cfg: dict) -> bool:
     """Completa una configuración vieja con lo que trae el programa (Telegram,
     correo, correos por estación, streams nuevos) sin borrar nada del usuario."""
-    if int(cfg.get("version", 1)) >= 2 or not os.path.exists(INITIAL_FILE):
+    ver = int(cfg.get("version", 1))
+    if ver < 3:
+        # v3: Shoutcast 2 de Chignahuapan manda su página web en "/"; "/;" siempre da audio
+        for st in cfg.get("estaciones", []):
+            for x in st.get("streams", []):
+                if x.get("url", "").rstrip("/") == "http://148.228.50.33:8000":
+                    x["url"] = "http://148.228.50.33:8000/;"
+    if ver >= 2 or not os.path.exists(INITIAL_FILE):
+        if ver < 3:
+            cfg["version"] = 3
+            return True
         return False
     try:
         with open(INITIAL_FILE, "r", encoding="utf-8") as f:
@@ -179,7 +189,7 @@ def migrate_config(cfg: dict) -> bool:
         for x in ist.get("streams", []):
             if x["url"] not in urls:
                 st.setdefault("streams", []).append({"id": new_id(), **x})
-    cfg["version"] = 2
+    cfg["version"] = 3
     log.info("Configuración actualizada con Telegram, correo y streams nuevos")
     return True
 

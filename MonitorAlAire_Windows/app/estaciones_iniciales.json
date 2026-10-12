@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "telegram": {
     "token": "8784430014:AAEa3z28QPDMSyUqkcHVJMbo2NJ9bmEQufk",
     "chat_ids": [
@@ -84,7 +84,7 @@
         },
         {
           "nombre": "Respaldo",
-          "url": "http://148.228.50.33:8000"
+          "url": "http://148.228.50.33:8000/;"
         }
       ],
       "correos": [
