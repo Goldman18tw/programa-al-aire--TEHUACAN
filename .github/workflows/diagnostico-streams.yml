@@ -1,0 +1,26 @@
+name: Diagnóstico de servidores de streaming
+
+on:
+  push:
+    paths:
+      - ".github/workflows/diagnostico-streams.yml"
+  workflow_dispatch:
+
+jobs:
+  probar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probar servidores HTTP por IP
+        run: |
+          VLC="VLC/3.0.20 LibVLC/3.0.20"
+          CHROME="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+          for host in 148.228.50.33:8000 148.228.50.35:8000 148.228.50.32:8000 187.141.99.161:8000 200.52.172.206:8000; do
+            for path in "/" "/;" "/stream" "/;stream.mp3" "/7.html" "/stats?sid=1&json=1"; do
+              for ua in "$VLC" "$CHROME"; do
+                out=$(curl -s -m 6 -A "$ua" -o body.bin -D head.txt -w "%{http_code} %{content_type} %{size_download}" "http://$host$path" 2>&1)
+                first=$(head -c 120 body.bin | tr -c '[:print:]' '.')
+                status=$(head -1 head.txt | tr -d '\r')
+                echo "$host$path [${ua%%/*}] -> $out | $status | $first"
+              done
+            done
+          done
